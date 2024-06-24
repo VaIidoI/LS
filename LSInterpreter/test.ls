@@ -1,6 +1,2 @@
-string str = "Hello world";
-if: str == "Hello World!", end;
-printl: str;
-
-=end;
-	printl: "What?!";
+string str = "Hello World!"; printl: str; endl; cls;
+string in = ""; input: in; printl: in; exit: 1;
