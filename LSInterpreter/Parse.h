@@ -11,10 +11,8 @@
 
 using std::vector; using std::string; using std::to_string;
 
-const std::unordered_set<char> delimiters = { ' ', '\t' };
-const std::unordered_set<string> operators = { "==", "!=", "<" ,"<=" ,">" ,">=" };
-
 // Brief explanation of operator types
+// -1. Actual argument
 //  0. Whitespace
 //  1. ':' character
 //  2. ',' character
@@ -22,7 +20,17 @@ const std::unordered_set<string> operators = { "==", "!=", "<" ,"<=" ,">" ,">=" 
 //  4. Modification characters like '=' and '+=' character
 //  5. Logical comparators like '==' and '>='
 using OpTypes = vector<int>;
-const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5} };
+const enum OpType {
+    ARG = -1,          
+    SPACE = 0,    
+    COLON = 1,         
+    COMMA = 2,         
+    SET = 3,           
+    MOD = 4,  
+    LOGIC = 5        
+};
+const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5} };
+
 
 std::string IntToOpType(const int& type) {
     switch (type) {
@@ -143,9 +151,10 @@ vector<string> Tokenize(const string& line) {
 }
 
 //Removes the quotes from a string
-void FormatString(string& s) {
+string FormatString(string& s) {
     //First and last chars should be '"'.
     s = s.substr(1, s.size() - 2);
+    return s;
 }
 
 //Removes a labels formatting
