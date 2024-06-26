@@ -69,11 +69,27 @@ int main(int argc, char* argv[]) {
         ExitError("Please specify a path to the file. ");
     }
 
-    std::ifstream file(argv[1]); string line;
+    std::ifstream file("test.ls"); string line;
 
     if (!file.is_open()) {
         ExitError("Cannot locate or open file.");
     }
+
+    //Predefine a vector storing all functions
+    vector<Func> funcVec;
+
+    //Predefine the maps which store the variables based on their names.
+    std::unordered_map<string, Var> memory;
+
+    //Create a list of keywords, which cannot be the names of variables.
+    vector<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
+
+    //Create a map storing the label's location along with a vector storing the line "history"
+    //Also create a lineIndex to keep track of the current line.
+    std::map<string, int> labelMap; vector<int> callHistory; int parsedLineIndex = 0;
+
+    //ErrorLevel is a flag that indicates if certain functions encountered any errors
+    int errorLevel = 0;
 
     //Firstly, get the lines and remove any whitespace, while ignoring empty lines. Also store the actual line.  
     vector<std::pair<int, string>> lines; int lineIndex = 0;
@@ -98,24 +114,42 @@ int main(int argc, char* argv[]) {
     }
     lines.clear();
 
-    //Predefine a map that stores all functions by their name, containing their implementation and their argument types.
-    std::map<string, std::pair<OpTypes, std::function<void(vector<string>)>>> funcMap;
-    //Predefine a vector storing all functions
-    vector<Func> funcVec;
+    //Iterate through every line (for the 3rd time). Resolve ifs and store the label line locations
+    vector<pair<int, int>> ifVec;
+    for (int i = 0; i < parsedLines.size(); i++) {
+        string l = parsedLines[i].second; int lineNum = parsedLines[i].first;
 
-    //Predefine the maps which store the variables based on their names.
+        //If the line starts with an if
+        if (l.rfind("if", 0) == 0) {
+            //push the line of the if-statement to the ifVec
+            ifVec.push_back({ i, lineNum });
+            //Remove semicolon
+            parsedLines[i].second.pop_back();
+            //Modify if-statement, in order to jump to the corresponding end if false.
+            parsedLines[i].second += ", END" + to_string(i) + ";";
+        }
 
-    std::unordered_map<string, Var> memory;
+        if (l == "end;") {
+            //Modify line to the same jump-statement defined in the corresponding if. 
+            parsedLines[i].second = "=END" + to_string(ifVec.back().first) + ";"; l = parsedLines[i].second;
+            //Remove the entry in the ifVec
+            ifVec.pop_back();
+        }
 
-    //Create a list of keywords, which cannot be the names of variables.
-    vector<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
+        if (l[0] != '=') continue;
+        if (l.back() != ';') ExitError("Expected semicolon on label initialization. Got: '" + l + "'");
+        string label = FormatLabel(l);
 
-    //Create a map storing the label's location along with a vector storing the line "history"
-    //Also create a lineIndex to keep track of the current line.
-    std::map<string, int> labelMap; vector<int> callHistory; int parsedLineIndex = 0;
+        if (label == string()) ExitError("Incorrect label initialization. Got: '" + l + "'");
 
-    //ErrorLevel is a flag that indicates if certain functions encountered any errors
-    int errorLevel = 0;
+        labelMap.emplace(label, i);
+        //also push the label names to the blacklist
+        blacklist.push_back(label);
+    }
+
+    //If any if-statements are still in vec, no end was received.
+    if (ifVec.size() > 0)
+        ExitError("If-statement did not receive end on line " + to_string(ifVec.front().second));
 
     //Function that searches though memory and returns the value of a variable given its name.
     auto FindVar = [&memory, &errorLevel](const string& varName, string& value, int& valueType) {
@@ -373,7 +407,7 @@ int main(int argc, char* argv[]) {
             memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
     }));
 
-    funcMap.emplace("delete", std::make_pair(1, [&](vector<string> v) {
+    funcVec.push_back(Func("delete", OpTypes{ COLON, ARG }, [&](vector<string> v) {
         string name = v[0], value; int type = -1;
         errorLevel = 0;
 
@@ -433,8 +467,8 @@ int main(int argc, char* argv[]) {
             throw std::exception(("Comparing different types. Type1: '" + IntToType(value1Type) + "' Type2: '" + IntToType(value2Type) + "'").c_str());
 
         //check for validity.
-        if ((op == "==" && value1 == value2) ||
-            (op == "!=" && value1 != value2)) {
+        if ((op == "==" && value1 != value2) ||
+            (op == "!=" && value1 == value2)) {
             FindFunc("jump")(vector<string> { v[3] }); return;
         }
         //If operators are indeed that, but not true then return
@@ -448,10 +482,11 @@ int main(int argc, char* argv[]) {
         //Convert to doubles for comparison
         double value1d = stod(value1); double value2d = stod(value2);
 
-        if ((op == "<" && value1d < value2d) ||
-            (op == ">" && value1d > value2d) ||
-            (op == ">=" && value1d >= value2d) ||
-            (op == "<=" && value1d <= value2d)) {
+        //If the conditions aren't met, jump to the end_if
+        if ((op == "<" && value1d >= value2d) ||
+            (op == ">" && value1d <= value2d) ||
+            (op == ">=" && value1d < value2d) ||
+            (op == "<=" && value1d > value2d)) {
             FindFunc("jump")(vector<string> { v[3] });
         }
     }));
@@ -459,19 +494,6 @@ int main(int argc, char* argv[]) {
     //Append function names to the blacklist
     for (const auto& a : funcVec)
         blacklist.push_back(a.GetName());
-
-    //Iterate through every line (for the 3rd time) and store the label line locations
-    for (int i = 0; i < parsedLines.size(); i++) {
-        if (parsedLines[i].second[0] != '=') continue;
-        if(parsedLines[i].second.back() != ';') ExitError("Expected semicolon on label initialization. Got: '" + parsedLines[i].second + "'");
-        string label = FormatLabel(parsedLines[i].second);
-
-        if (label == string()) ExitError("Incorrect label initialization. Got: '" + parsedLines[i].second + "'");
-
-        labelMap.emplace(label, i);
-        //also push the label names to the blacklist
-        blacklist.push_back(label);
-    }
 
     //Thirdly, tokenize each line and go through the actual interpretation process. 
     for (parsedLineIndex; parsedLineIndex < parsedLines.size(); parsedLineIndex++) {
