@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include "Parse.h"
+#include <chrono>
 
 using std::cout; using std::endl; using std::to_string; using std::pair; using std::make_pair;
 
@@ -15,7 +16,7 @@ class Func {
 public:
     Func() : name_(""), types_(OpTypes{}), implementation_() {}
 
-    Func(const string& name, const OpTypes& types, const std::function<void(vector<string>)>& imp)
+    Func(const string& name, const OpTypes& types, const std::function<void(const vector<string>&)>& imp)
         : name_(name), types_(types), implementation_(imp) {}
 
     //Getters
@@ -27,7 +28,7 @@ public:
         return types_;
     }
 
-    std::function<void(vector<string>)> GetImplementation() const {
+    std::function<void(const vector<string>&)> GetImplementation() const {
         return implementation_;
     }
 
@@ -37,10 +38,8 @@ public:
     }
 
 private:
-    std::string name_;
-    OpTypes types_;
-    std::function<void(std::vector<std::string>)> implementation_;
-    int returnType_;
+    int returnType_; std::string name_;    OpTypes types_;
+    std::function<void(const vector<string>&)> implementation_;
 };
 
 class Var {
@@ -61,7 +60,7 @@ public:
     }
 
 private:
-    string data_; int type_;
+    int type_; string data_;
 };
 
 int main(int argc, char* argv[]) {
@@ -75,14 +74,17 @@ int main(int argc, char* argv[]) {
         ExitError("Cannot locate or open file.");
     }
 
-    //Predefine a vector storing all functions
+    auto start = std::chrono::high_resolution_clock::now();
+
+    //Predefine a map storing all functions
+    std::unordered_map<string, vector<Func>> funcMap;
     vector<Func> funcVec;
 
     //Predefine the maps which store the variables based on their names.
     std::unordered_map<string, Var> memory;
 
     //Create a list of keywords, which cannot be the names of variables.
-    vector<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
+    std::unordered_set<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
 
     //Create a map storing the label's location along with a vector storing the line "history"
     //Also create a lineIndex to keep track of the current line.
@@ -101,7 +103,7 @@ int main(int argc, char* argv[]) {
     }
 
     //Secondly, parse the lines and store them in a parsedLines vector.
-    vector<std::pair<int, string>> parsedLines;
+    vector<pair<int, string>> parsedLines; vector<pair<int, string>> statementVec;
     for (const auto&[lineNum, l] : lines) {
         auto parsed = Parse(l);
 
@@ -109,32 +111,107 @@ int main(int argc, char* argv[]) {
             continue;
 
         //After seperating semicolons, trim them to get rid of any whitespace inbetween.
-        for (const string& x : parsed)
-            parsedLines.push_back({ lineNum, TrimWhitespace(x) });
-    }
-    lines.clear();
+        for (const string& x : parsed) {
+            //Thirdly, resolve control flow statements
+            string parsedLine = TrimWhitespace(x); auto tokens = Tokenize(l); string statementName = tokens[0];
+            if (statementName == "for") {
+                //A for loop always has at least 13 tokens
+                if (tokens.size() < 12)
+                    ExitError("Invalid args in for-loop initialization on line " + to_string(lineNum));
 
-    //Iterate through every line (for the 3rd time). Resolve ifs and store the label line locations
-    vector<pair<int, int>> ifVec;
+                if (tokens.back() != ":")
+                    ExitError("Invalid for-loop initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+
+                //For each for-loop segment, parse it and also validate the syntax
+                string initializer = "", condition = "", iteration = ""; int index = 1;
+                for (int i = index; tokens[i] != ","; i++, index++) {
+                    if (i == tokens.size() - 1)
+                        ExitError("Invalid for-loop initialization. Expected: ',' on line " + to_string(lineNum));
+                    initializer += tokens[i];
+                }
+                index++;
+                for (int i = index; tokens[i] != ","; i++, index++) {
+                    if (i == tokens.size() - 1)
+                        ExitError("Invalid for-loop initialization. Expected: ',' on line " + to_string(lineNum));
+                    condition += tokens[i];
+                }
+                index++;
+                for (int i = index; tokens[i] != ":"; i++)
+                    iteration += tokens[i];
+
+                if(initializer.empty() || condition.empty() || iteration.empty())
+                    ExitError("Invalid for-loop initialization. Segments not defined properly on line" + to_string(lineNum));
+               
+                int endIndex = lineNum;
+                //Insert all of the necessary lines 
+                parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
+                parsedLines.push_back({ lineNum,  "=FOR_" + to_string(endIndex) + ";"});
+                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
+                statementVec.push_back({ lineNum, iteration + ";jump: FOR_" + to_string(endIndex)
+                                                  + ";=END_" + to_string(endIndex) + ";delete: " + tokens[1] + ";" });
+            }
+            else if (statementName == "while") {
+                if (tokens.size() < 5)
+                    ExitError("Invalid args in while-loop initialization on line " + to_string(lineNum));
+
+                if (tokens.back() != ":")
+                    ExitError("Invalid while-loop initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+                
+                string condition = "";
+                for (int i = 1; tokens[i] != ":"; i++) {
+                    condition += tokens[i];
+                }
+
+                if (condition.empty())
+                    ExitError("Invalid while-loop initialization. Condition not defined properly on line" + to_string(lineNum));
+
+                int endIndex = lineNum;
+                parsedLines.push_back({ lineNum,  "=WHILE_" + to_string(endIndex) + ";" });
+                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
+                statementVec.push_back({ lineNum, "jump: WHILE_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";"});
+            }
+            else if (statementName == "if") {
+                if (tokens.size() < 5)
+                    ExitError("Invalid args in if-statement initialization on line " + to_string(lineNum));
+
+                if (tokens.back() != ":")
+                    ExitError("Invalid if-statement initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+
+                int endIndex = lineNum;
+                //Remove colon
+                parsedLine.pop_back();
+                //Modify if-statement, in order to jump to the corresponding end if false.
+                parsedLine += ", END_" + to_string(endIndex) + ";";
+                parsedLines.push_back({ lineNum, parsedLine });
+                statementVec.push_back({ lineNum, "=END_" + to_string(endIndex) + ";" });
+            }
+            else if (statementName == "end") {
+                if(statementVec.size() == 0)
+                    ExitError("Received hanging end-statement on line " + to_string(lineNum));
+                //Modify line to the last entry in the statementVec
+                parsedLine = statementVec.back().second;
+
+                for(const auto& s : SplitString(parsedLine, ';'))
+                    parsedLines.push_back({ lineNum, s + ";"});
+
+                //Remove the entry in the statementVec
+                statementVec.pop_back();
+            }
+            else {
+                parsedLines.push_back({ lineNum, parsedLine });
+            }
+        }
+    }
+
+    //If any statements are still in vec, no end was received.
+    if (statementVec.size() > 0)
+        ExitError("If-statement did not receive end on line " + to_string(statementVec.front().first));
+
+    lines.clear(); statementVec.clear();
+
+    //Fouth, resolve label names
     for (int i = 0; i < parsedLines.size(); i++) {
         string l = parsedLines[i].second; int lineNum = parsedLines[i].first;
-
-        //If the line starts with an if
-        if (l.rfind("if", 0) == 0) {
-            //push the line of the if-statement to the ifVec
-            ifVec.push_back({ i, lineNum });
-            //Remove semicolon
-            parsedLines[i].second.pop_back();
-            //Modify if-statement, in order to jump to the corresponding end if false.
-            parsedLines[i].second += ", END" + to_string(i) + ";";
-        }
-
-        if (l == "end;") {
-            //Modify line to the same jump-statement defined in the corresponding if. 
-            parsedLines[i].second = "=END" + to_string(ifVec.back().first) + ";"; l = parsedLines[i].second;
-            //Remove the entry in the ifVec
-            ifVec.pop_back();
-        }
 
         if (l[0] != '=') continue;
         if (l.back() != ';') ExitError("Expected semicolon on label initialization. Got: '" + l + "'");
@@ -144,12 +221,8 @@ int main(int argc, char* argv[]) {
 
         labelMap.emplace(label, i);
         //also push the label names to the blacklist
-        blacklist.push_back(label);
+        blacklist.insert(label);
     }
-
-    //If any if-statements are still in vec, no end was received.
-    if (ifVec.size() > 0)
-        ExitError("If-statement did not receive end on line " + to_string(ifVec.front().second));
 
     //Function that searches though memory and returns the value of a variable given its name.
     auto FindVar = [&memory, &errorLevel](const string& varName, string& value, int& valueType) {
@@ -157,6 +230,7 @@ int main(int argc, char* argv[]) {
         if (varName == "errorLevel") {
             value = to_string(errorLevel);
             valueType = INT;
+            return true;
         }
 
         auto found = memory.find(varName);
@@ -215,287 +289,342 @@ int main(int argc, char* argv[]) {
             throw std::exception(("Variable by the name of '" + varName + "' already defined").c_str());
     };
 
-    //Returns: Function implementation by name
-    auto FindFunc = [&funcVec](const string& funcName) {
-        return (*std::find_if(funcVec.cbegin(), funcVec.cend(), [funcName](const Func& f) {
-            return f.GetName() == funcName;
-        })).GetImplementation(); 
+    //Returns: Function implementation by name and opTypes
+    auto FindFunc = [&funcMap](const string& funcName, const OpTypes& types) {
+        //Find the function vector given the name
+        auto found = funcMap.find(funcName);
+        if(found == funcMap.cend())
+            throw std::exception(("Function expected, got: '" + funcName + "'").c_str());
+        auto funcSet = (*found).second;
+
+        //Get the corresponding function implementation based on the types
+        auto func = std::find_if(funcSet.cbegin(), funcSet.cend(), [types](const Func& f) {
+            return f.GetTypes() == types;
+        });
+
+        //Build the error message
+        string error = "";
+        for (const int& a : types)
+            error += "'" + IntToOpType(a) + "', ";
+        //Remove the comma lol
+        if (!error.empty()) {
+            error.pop_back(); error.pop_back();
+        }
+
+        if (func == funcSet.cend())
+            throw std::exception(("No overload for function '" + funcName + "' matches types: " + error).c_str());
+
+        return (*func).GetImplementation();
     };
 
-    funcVec.push_back(Func("print", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
-        string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
+    funcMap.insert({ "print", vector<Func> {
+        Func("print", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+            string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
 
-        if (valueType == STRING)
-            FormatString(value);
+            if (valueType == STRING)
+                FormatString(value);
 
-        cout << value;
-    }));
+            cout << value;
+        })
+    } });
 
-    funcVec.push_back(Func("printl", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
-        string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
+    funcMap.insert({ "printl", vector<Func> {
+        Func("printl", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+            string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
 
-        if (valueType == STRING)
-            FormatString(value);
+            if (valueType == STRING)
+                FormatString(value);
 
-        cout << value << endl;
-    }));
+            cout << value << endl;
+        })
+    } });
 
-    funcVec.push_back(Func("endl", OpTypes {}, [ResolveValue](vector<string> v) {
-        cout << endl;
-    }));
+    funcMap.insert({ "endl", vector<Func> {
+        Func("endl", OpTypes{}, [ResolveValue](vector<string> v) {
+            cout << endl;
+        })
+    } });
 
-    funcVec.push_back(Func("cls", OpTypes{}, [ResolveValue](vector<string> v) {
-        //Istg this is the best way to do this
-        cout << "\033[2J\033[1;1H" << endl;
-    }));
+    funcMap.insert({ "cls", vector<Func> {
+        Func("cls", OpTypes{}, [ResolveValue](vector<string> v) {
+            // Istg this is the best way to do this
+            cout << "\033[2J\033[1;1H" << endl;
+        })
+    } });
 
-    funcVec.push_back(Func("input", OpTypes { COLON, ARG }, [&](vector<string> v) {
-        string name = v[0], value; int type = -1;
-        //Reset errorLevel to 0 
-        errorLevel = 0;
+    funcMap.insert({ "input", vector<Func> {
+        Func("input", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0], value; int type = -1;
+            // Reset errorLevel to 0 
+            errorLevel = 0;
 
-        if(!FindVar(name, value, type))
-            throw std::exception(("Input received undefined variable '" + name + "'").c_str());
-        
-        //Get the line and its datatype. If it's errortype, it becomes a string, due to it not being anything else
-        string s = ""; std::getline(std::cin, s); int lineType = GetDataType(s);
+            if (!FindVar(name, value, type))
+                throw std::exception(("Input received undefined variable '" + name + "'").c_str());
 
-        if (lineType == ERROR)
-            lineType = STRING;
+            // Get the line and its datatype. If it's errortype, it becomes a string, due to it not being anything else
+            string s = ""; std::getline(std::cin, s); int lineType = GetDataType(s);
 
-        //Uninitialized variable as target, proceed accordingly
-        if (type == ERROR) {
-            memory[name] = Var(s, lineType); return;
-        }
+            if (lineType == ERROR)
+                lineType = STRING;
 
-        //Set errorLevel to 1, indicating a type mismatch, unless type is a string. 
-        if (type != lineType && type != STRING)
-            errorLevel = 1;
+            // Uninitialized variable as target, proceed accordingly
+            if (type == ERROR) {
+                memory[name] = Var(s, lineType); return;
+            }
 
-        //Save it to the corresponding variable
-        if (errorLevel == 0) {
-            memory[name].SetData(s);
-        }
-    }));
+            // Set errorLevel to 1, indicating a type mismatch, unless type is a string. 
+            if (type != lineType && type != STRING)
+                errorLevel = 1;
 
-    //Overload: Print a string before inputting. 
-    funcVec.push_back(Func("input", OpTypes{ COLON, ARG, COMMA, ARG }, [&](vector<string> v) {
-        cout << FormatString(v[0]); FindFunc("input")(vector<string> { v[1] });
-    }));
+            // Save it to the corresponding variable
+            if (errorLevel == 0) {
+                memory[name].SetData(s);
+            }
+        }),
+        // Overload: Print a string before inputting. 
+        Func("input", OpTypes{ COLON, ARG, COMMA, ARG }, [&](vector<string> v) {
+            cout << FormatString(v[0]); FindFunc("input", OpTypes{ COLON, ARG })(vector<string>{v[1]});
+        })
+    }});
 
-    funcVec.push_back(Func("var", OpTypes{ SPACE, ARG, SET, ARG }, [&](vector<string> v) {
-        string name = v[0]; string value = v[1]; int valueType = 0;
-        ResolveValue(value, valueType);
+    funcMap.insert({ "var", vector<Func> {
+        Func("var", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
+            string name = v[0]; string value = v[1]; int valueType = 0;
+            ResolveValue(value, valueType);
 
-        ValidateVarName(name);
-        if(valueType == STRING)
-            FormatString(value);
+            ValidateVarName(name);
+            if (valueType == STRING)
+                FormatString(value);
 
-        memory[name] = Var(value, valueType);
-    }));
+            memory[name] = Var(value, valueType);
+        }),
+        // Overload: Define variable, but do not initialize it
+        Func("var", OpTypes{ ARG }, [&](vector<string> v) {
+            string name = v[0];
+            ValidateVarName(name);
 
-    //Overload: Define variable, but do not initialize it
-    funcVec.push_back(Func("var", OpTypes{ SPACE, ARG }, [&](vector<string> v) {
-        string name = v[0];
-        ValidateVarName(name);
+            memory[name] = Var("", ERROR);
+        })
+    }});
 
-        memory[name] = Var("", ERROR);
-    }));
+    funcMap.insert({ "[VarName]", vector<Func> {
+        // Sets a variable to a value
+        // the final line should look like [VarName] var1 = value, thus having an additional 0 prepended.
+        Func("[VarName]", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
+            string name = v[0]; string nameValue = ""; int nameType = 0;
+            string value = v[1]; int valueType = 0; ResolveValue(value, valueType);
 
-    //Sets a variable to a value
-    //the final line should look like [VarName] var1 = value, thus having an additional 0 prepended.
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, SET, ARG }, [&](vector<string> v) {
-        string name = v[0]; string nameValue = ""; int nameType = 0;
-        string value = v[1]; int valueType = 0; ResolveValue(value, valueType);
+            // if the name doesn't get found
+            if (!FindVar(name, nameValue, nameType))
+                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
 
-        //if the name doesn't get found
-        if(!FindVar(name, nameValue, nameType))
-            throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+            // Uninitialized variable as target, proceed accordingly
+            if (nameType == ERROR) {
+                memory[name] = Var(value, valueType); return;
+            }
 
-        //Uninitialized variable as target, proceed accordingly
-        if (nameType == ERROR) {
-            memory[name] = Var(value, valueType); return;
-        }
+            // If it isn't the same type, or number type.
+            if (nameType != valueType && !(nameType == DOUBLE && valueType == INT) && !(nameType == INT && valueType == DOUBLE))
+                throw std::exception(("Setter received wrong type. Got: '" + IntToType(valueType) + "' Expected: '" + IntToType(nameType) + "'").c_str());
 
-        //If it isn't the same type, or number type.
-        if(nameType != valueType 
-            && !(nameType == DOUBLE && valueType == INT)
-            && !(nameType == INT && valueType == DOUBLE))
-            throw std::exception(("Setter received wrong type. Got: '" + IntToType(valueType) + "' Expected: '" +  IntToType(nameType) + "'").c_str());
+            memory[name] = Var(value, valueType);
+        }),
+        // Modifying a variable
+        Func("[VarName]", OpTypes{ ARG, MOD, ARG }, [&](vector<string> v) {
+            string name = v[0]; string nameValue = ""; int nameType = 0;
+            string value = v[2]; int valueType = 0; ResolveValue(value, valueType);
+            string op = v[1];
 
-        memory[name] = Var(value, valueType);
-    }));
+            // if the name doesn't get found
+            if (!FindVar(name, nameValue, nameType))
+                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
 
-    //Modifying a variable
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, MOD, ARG }, [&](vector<string> v) {
-        string name = v[0]; string nameValue = ""; int nameType = 0;
-        string value = v[2]; int valueType = 0; ResolveValue(value, valueType);
-        string op = v[1];
+            // If it isn't the same type, or number type.
+            if (nameType != valueType && !(nameType == DOUBLE && valueType == INT) && !(nameType == INT && valueType == DOUBLE))
+                throw std::exception(("Arithmetic operation received wrong type. Got: '" + IntToType(valueType) + "' Expected: '" + IntToType(nameType) + "'").c_str());
 
-        //if the name doesn't get found
-        if (!FindVar(name, nameValue, nameType))
-            throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+            if (nameType == BOOL)
+                throw std::exception("Cannot perform arithmetic operation on type 'bool'");
 
-        //If it isn't the same type, or number type.
-        if (nameType != valueType
-            && !(nameType == DOUBLE && valueType == INT)
-            && !(nameType == INT && valueType == DOUBLE))
-            throw std::exception(("Arithmatic operation received wrong type. Got: '" + IntToType(valueType) + "' Expected: '" + IntToType(nameType) + "'").c_str());
+            if (nameType == STRING && op != "+=")
+                throw std::exception(("Cannot use operator '" + op + "' on a string").c_str());
+            else if (nameType == STRING) {
+                string data = memory.at(name).GetData(); FormatString(value);
+                memory[name].SetData(data + value); return;
+            }
 
-        if (nameType == BOOL)
-            throw std::exception("Cannot perform arithmatic operation on type 'bool'");
+            // Get the data from memory
+            double data = stod(memory.at(name).GetData());
+            double newData = stod(value);
 
-        if (nameType == STRING && op != "+=")
-            throw std::exception(("Cannot use operator '" + op + "' on a string").c_str());
-        else if (nameType == STRING) {
-            string data = memory.at(name).GetData(); FormatString(value);
-            memory[name].SetData(data + value); return;
-        }
+            if (op == "+=")
+                memory[name].SetData(to_string(data + newData));
+            else if (op == "-=")
+                memory[name].SetData(to_string(data - newData));
+            else if (op == "*=")
+                memory[name].SetData(to_string(data * newData));
+            else if (op == "/=") {
+                if (stod(value) == 0.0)
+                    throw std::exception("Division by 0 attempted ");
 
-        //Get the data from memory
-        double data = stod(memory.at(name).GetData());
-        double newData = stod(value);
+                memory[name].SetData(to_string(data / newData));
+            }
+            else if (op == "%=") {
+                if (stod(value) == 0.0)
+                    throw std::exception("Modulo by 0 attempted ");
 
-        if (op == "+=")
-            memory[name].SetData(to_string(data + newData));
-        else if (op == "-=")
-            memory[name].SetData(to_string(data - newData));
-        else if (op == "*=")
-            memory[name].SetData(to_string(data * newData));
-        else if (op == "/=") {
-            if (stod(value) == 0.0)
-                throw std::exception("Division by 0 attempted ");
+                memory[name].SetData(to_string((int)data % (int)newData));
+            }
 
-            memory[name].SetData(to_string(data / newData));
-        }
-        else if (op == "%=") {
-            if (stod(value) == 0.0)
-                throw std::exception("Modolo by 0 attempted ");
+            // Code efficient, albeit scuffed solution
+            if (nameType == INT)
+                memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
+        }),
+        // Incrementing or decrementing variable
+        Func("[VarName]", OpTypes{ ARG, MOD }, [&](vector<string> v) {
+            string name = v[0], value = ""; int type = 0;
+            string op = v[1];
 
-            memory[name].SetData(to_string((int)data % (int)newData));
-        }
+            // if the name doesn't get found
+            if (!FindVar(name, value, type))
+                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
 
-        //Code efficient, albeit scuffed solution
-        if (nameType == INT)
-            memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
-    }));
+            // If type is string or bool
+            if (type == STRING || type == BOOL)
+                throw std::exception(("Cannot use operator '" + op + "' on type '" + IntToType(type) + "'").c_str());
 
-    //Incrementing or decrementing variable
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, MOD }, [&](vector<string> v) {
-        string name = v[0], value = ""; int type = 0;
-        string op = v[1];
+            double data = stod(memory.at(name).GetData());
 
-        //if the name doesn't get found
-        if (!FindVar(name, value, type))
-            throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+            if (op == "++")
+                memory[name].SetData(to_string(data + 1.0));
+            else if (op == "--")
+                memory[name].SetData(to_string(data - 1.0));
+            else
+                throw std::exception("Wrong operator received. Expected '++' or '--'");
 
-        //If type is string or bool
-        if (type == STRING || type == BOOL)
-            throw std::exception(("Cannot use operator '" + op + "' on type '" + IntToType(type) + "'").c_str());
+            // Code efficient, albeit scuffed solution
+            if (type == INT)
+                memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
+        })
+    }});
 
-        double data = stod(memory.at(name).GetData());
+    funcMap.insert({ "sqrt", vector<Func> {
+        // Modifying a variable
+        Func("sqrt", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0]; string nameValue = ""; int nameType = 0;
 
-        if (op == "++")
-            memory[name].SetData(to_string(data + 1.0));
-        else if (op == "--")
-            memory[name].SetData(to_string(data - 1.0));
-        else
-            throw std::exception("Wrong operator received. Expected '++' or '--'");
+            // if the name doesn't get found
+            if (!FindVar(name, nameValue, nameType))
+                throw std::exception(("Sqrt received a literal or undefined variable. Got: '" + name + "'").c_str());
 
-        //Code efficient, albeit scuffed solution
-        if (type == INT)
-            memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
-    }));
+            // If it isn't the same type, or number type.
+            if (nameType != DOUBLE && nameType != INT)
+                throw std::exception(("Square root operation received wrong type. Got: '" + IntToType(nameType) + "'").c_str());
 
-    funcVec.push_back(Func("delete", OpTypes{ COLON, ARG }, [&](vector<string> v) {
-        string name = v[0], value; int type = -1;
-        errorLevel = 0;
+            // Get the data from memory
+            double data = stod(memory.at(name).GetData());
 
-        if (!FindVar(name, value, type)) {
-            errorLevel = 1; return;
-        }
-            
-        memory.erase(name);
-    }));
+            memory[name].SetData(to_string(sqrt(data)));
 
-    funcVec.push_back(Func("exit", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
-        string code = v[0]; int type = 0; ResolveValue(code, type);
+            // Code efficient, albeit scuffed solution, converts double to int 
+            if (nameType == INT)
+                memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
+        })
+    }});
 
-        if (GetDataType(code) != INT) throw std::exception(("Exit requires argument type: 'int' got: '" + IntToType(type) + "'").c_str());
-        cout << endl << "Program exited with code: " << code << endl;
-        exit(stoi(code));
-    }));
+    funcMap.insert({ "delete", vector<Func> {
+        Func("delete", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0], value; int type = -1;
+            errorLevel = 0;
 
-    funcVec.push_back(Func("jump", OpTypes { COLON, ARG }, [&](vector<string> v) {
-        string name = v[0]; int nameType = GetDataType(name);
+            if (!FindVar(name, value, type)) {
+                errorLevel = 1; return;
+            }
 
-        //As labels can only be ErrorTypes, check for that
-        if (nameType != ERROR)
-            throw std::exception(("Tried to jump to label of type '" + IntToType(nameType) + "'").c_str());
+            memory.erase(name);
+        })
+    }});
 
-        if (labelMap.find(name) == labelMap.cend())
-            throw std::exception(("Tried to jump to undefined label. Got: '" + name + "'").c_str());
+    funcMap.insert({ "exit", vector<Func> {
+        Func("exit", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+            string code = v[0]; int type = 0; ResolveValue(code, type);
 
-        int newLine = labelMap[name];
+            if (GetDataType(code) != INT) throw std::exception(("Exit requires argument type: 'int' got: '" + IntToType(type) + "'").c_str());
+            cout << endl << "Program exited with code: " << code << endl;
+            exit(stoi(code));
+        })
+    }});
 
-        //Push current line to callHistory and set index to newLine
-        callHistory.push_back(parsedLineIndex);
-        parsedLineIndex = newLine;
-    }));
+    funcMap.insert({ "jump", vector<Func> {
+        Func("jump", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0]; int nameType = GetDataType(name);
 
-    funcVec.push_back(Func("return", OpTypes{}, [&](vector<string> v) {
-        //Return is equivalent to exit if the callHistory is empty.
-        if (callHistory.size() < 1)
-            FindFunc("exit")(vector<string> { "0" });
+            // As labels can only be ErrorTypes, check for that
+            if (nameType != ERROR)
+                throw std::exception(("Tried to jump to label of type '" + IntToType(nameType) + "'").c_str());
 
-        //Set current line to latest entry and remove the entry. 
-        parsedLineIndex = callHistory.back(); callHistory.pop_back();
-    }));
+            if (labelMap.find(name) == labelMap.cend())
+                throw std::exception(("Tried to jump to undefined label. Got: '" + name + "'").c_str());
 
-    funcVec.push_back(Func("if", OpTypes{ COLON, ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
-        string value1 = v[0]; int value1Type = 0;
-        string op = v[1];
-        string value2 = v[2]; int value2Type = 0;
+            int newLine = labelMap[name];
 
-        //As you can compare both variables and literals, resolve them.
-        ResolveValue(value1, value1Type); ResolveValue(value2, value2Type);
+            // Push current line to callHistory and set index to newLine
+            callHistory.push_back(parsedLineIndex);
+            parsedLineIndex = newLine;
+        })
+    }});
 
-        //Make sure to not compare different types, unless double and int
-        if (value1Type != value2Type
-            && !(value1Type == DOUBLE && value2Type == INT)
-            && !(value1Type == INT && value2Type == DOUBLE))
-            throw std::exception(("Comparing different types. Type1: '" + IntToType(value1Type) + "' Type2: '" + IntToType(value2Type) + "'").c_str());
+    funcMap.insert({ "return", vector<Func> {
+        Func("return", OpTypes{}, [&](vector<string> v) {
+            // Return is equivalent to exit if the callHistory is empty.
+            if (callHistory.size() < 1)
+                FindFunc("exit", OpTypes{ COLON, ARG })(vector<string> { "0" });
 
-        //check for validity.
-        if ((op == "==" && value1 != value2) ||
-            (op == "!=" && value1 == value2)) {
-            FindFunc("jump")(vector<string> { v[3] }); return;
-        }
-        //If operators are indeed that, but not true then return
-        else if ((op == "==" || op == "!="))
-            return;
+            // Set current line to latest entry and remove the entry. 
+            parsedLineIndex = callHistory.back(); callHistory.pop_back();
+        })
+    }});
 
-        //greater than, etc cannot be used on non-number types
-        if(value1Type == STRING || value1Type == BOOL)
-            throw std::exception(("Cannot use relational operators on Type: '" + IntToType(value1Type) + "'").c_str());
+    funcMap.insert({ "if", vector<Func> {
+        Func("if", OpTypes{ ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
+            string value1 = v[0]; int value1Type = 0;
+            string op = v[1];
+            string value2 = v[2]; int value2Type = 0;
 
-        //Convert to doubles for comparison
-        double value1d = stod(value1); double value2d = stod(value2);
+            // As you can compare both variables and literals, resolve them.
+            ResolveValue(value1, value1Type); ResolveValue(value2, value2Type);
 
-        //If the conditions aren't met, jump to the end_if
-        if ((op == "<" && value1d >= value2d) ||
-            (op == ">" && value1d <= value2d) ||
-            (op == ">=" && value1d < value2d) ||
-            (op == "<=" && value1d > value2d)) {
-            FindFunc("jump")(vector<string> { v[3] });
-        }
-    }));
+            // Make sure to not compare different types, unless double and int
+            if (value1Type != value2Type && !(value1Type == DOUBLE && value2Type == INT) && !(value1Type == INT && value2Type == DOUBLE))
+                throw std::exception(("Comparing different types. Type1: '" + IntToType(value1Type) + "' Type2: '" + IntToType(value2Type) + "'").c_str());
+
+            // check for validity.
+            if ((op == "==" && value1 != value2) || (op == "!=" && value1 == value2)) {
+                FindFunc("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] }); return;
+            }
+            // If operators are indeed that, but not true then return
+            else if ((op == "==" || op == "!="))
+                return;
+
+            // greater than, etc cannot be used on non-number types
+            if (value1Type == STRING || value1Type == BOOL)
+                throw std::exception(("Cannot use relational operators on Type: '" + IntToType(value1Type) + "'").c_str());
+
+            // Convert to doubles for comparison
+            double value1d = stod(value1); double value2d = stod(value2);
+
+            // If the conditions aren't met, jump to the end_if
+            if ((op == "<" && value1d >= value2d) || (op == ">" && value1d <= value2d) || (op == ">=" && value1d < value2d) || (op == "<=" && value1d > value2d)) {
+                FindFunc("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] });
+            }
+        })
+    }});
 
     //Append function names to the blacklist
     for (const auto& a : funcVec)
-        blacklist.push_back(a.GetName());
+        blacklist.insert(a.GetName());
 
-    //Thirdly, tokenize each line and go through the actual interpretation process. 
+    //Fifth, tokenize each line and go through the actual interpretation process. 
     for (parsedLineIndex; parsedLineIndex < parsedLines.size(); parsedLineIndex++) {
         int lineNum = parsedLines[parsedLineIndex].first; string l = parsedLines[parsedLineIndex].second;
 
@@ -529,74 +658,38 @@ int main(int argc, char* argv[]) {
             tokens.insert(tokens.begin(), "[VarName]"); funcName = "[VarName]";
         }
         
-        bool bFound = false, bFinished = false;
-        //Get the function that fits best. (Has the correct number of types)
-        for (const Func& f : funcVec) {
-            if (f.GetName() != funcName) continue; bFound = true;
-            OpTypes argTypes = f.GetTypes();  
-            //Subtract the count of type-0 argTypes from the final total, in order to skip over whitespace
-            int whitespaceArgs = std::count(argTypes.cbegin(), argTypes.cend(), 0);
-            //Get the total amount of tokens the function should have
-            int tokenCount = argTypes.size() - whitespaceArgs + 2;
-
-            //Make sure the function has the correct amount of tokens, if not continue
-            if (tokenCount != tokens.size())
-                continue;
-
-            vector<string> args; int argTypeIndex = 0;
-
-            //Parse the arguments.
-            for (int i = 1; i < tokens.size() - 1; i++) {
-                string token = tokens[i]; int argType = argTypes[argTypeIndex];
-
-                //As argType 0 is whitespace, which is not saved in the tokenizing process, skip to the next arg. 
-                if (argType == 0)
-                    argType = argTypes[++argTypeIndex];
-
-                if (argType == ARG)
+        vector<string> args; OpTypes argTypes;
+        //For each token, check its opType and push it back to the vector
+        for (int i = 1; i < tokens.size() - 1; i++) {
+            string token = tokens[i];
+            //Token is not a seperator, therefore it is an argument
+            auto found = separators.find(token);
+            if (found == separators.cend()) {
+                args.push_back(token); argTypes.push_back(ARG);
+            }
+            //Token is a seperator and has a corresponding OpType
+            else {
+                int argType = (*found).second;
+                argTypes.push_back(argType);
+                //As opTypes 2 and below are unambiguous, do not push them
+                if(argType > 3)
                     args.push_back(token);
-                //If it is not an argument
-                else {
-                    //Token has to be a valid seperator, and of the same opType
-                    auto found = separators.find(token);
-                    if (found == separators.cend())
-                        break;
-
-                    if ((*found).second != argType)
-                        break;
-
-                    //As opTypes 2 and below are unambiguous, do not push them
-                    if (argType > 3)
-                        args.push_back(token);
-                }
-                argTypeIndex++;
             }
-            
-            //The total amount of args the function requires. Only take in opTypes above 3 or -1
-            int argTotal = std::count_if(argTypes.cbegin(), argTypes.cend(), [](int value) {
-                return (value > 3 || value == ARG) ? true : false;
-            });
-
-            //Check if all tokens were correct, leading to a satisfactory amount of arguments
-            if (args.size() != argTotal)
-                continue;
-
-            //Call the function
-            try {
-                f.Execute(args);
-            }
-            catch (const std::exception& e) {
-                ExitError(string(e.what()) + " on line " + to_string(lineNum));
-            }
-            bFinished = true; break;
         }
 
-        //If token0 is not an function
-        if(!bFound)
-            ExitError("Function expected, got: '" + funcName + "' on line " + to_string(lineNum));
-        if(bFound && !bFinished)
-            ExitError("No function overload of function '" + funcName + "' matches argument list on line " + to_string(lineNum));
+        //Call the function
+        try {
+            auto f = FindFunc(funcName, argTypes); f(args);
+        }
+        catch (const std::exception& e) {
+            ExitError(string(e.what()) + " on line " + to_string(lineNum));
+        }
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+   cout << endl << "Program sucessfully executed. Exited with code 0." <<  endl <<
+       "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
    
     file.close();
     return 0;

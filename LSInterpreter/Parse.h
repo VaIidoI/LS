@@ -21,8 +21,7 @@ using std::vector; using std::string; using std::to_string;
 //  5. Logical comparators like '==' and '>='
 using OpTypes = vector<int>;
 const enum OpType {
-    ARG = -1,          
-    SPACE = 0,    
+    ARG = 0,              
     COLON = 1,         
     COMMA = 2,         
     SET = 3,           
@@ -35,7 +34,7 @@ const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"
 std::string IntToOpType(const int& type) {
     switch (type) {
     case 0:
-        return "Whitespace";
+        return "Argument";
     case 1:
         return "':'";
     case 2:
@@ -61,6 +60,21 @@ string TrimWhitespace(const string& line)
     if (start == string::npos) return "";
     size_t end = line.find_last_not_of(tags);
     return (start == end) ? line.substr(start, 1) : line.substr(start, end - start + 1);
+}
+
+vector<string> SplitString(const string& s, const char& delimiter) {
+    vector<string> ret(1, string());
+    for (const char& c : s) {
+        if (c == delimiter) {
+            ret.push_back(string()); continue;
+        }
+        ret.back() += c;
+    }
+
+    if (ret.back() == string())
+        ret.pop_back();
+
+    return ret;
 }
 
 //Returns: Parsed line vector | Parse a line, making sure ; equals a new line, while checking if it isn't within quotes or in a comment. 
