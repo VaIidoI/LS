@@ -170,5 +170,21 @@ string FormatLabel(const string& label) {
     return s;
 }
 
+vector<string> SplitString(const string& s, const char& delimiter) {
+    vector<string> ret(1, string());
+
+    for (const char& c : s) {
+        if (c == delimiter) {
+            ret.push_back(string()); continue;
+        }
+        ret.back() += c;
+    }
+
+    if (ret.back().empty())
+        ret.pop_back();
+
+    return ret;
+}
+
 #endif // !PARSE_H
 

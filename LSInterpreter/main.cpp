@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include "Parse.h"
+#include <chrono>
 
 using std::cout; using std::endl; using std::to_string; using std::pair; using std::make_pair;
 
@@ -64,6 +65,10 @@ private:
     string data_; int type_;
 };
 
+class FlowStatement {
+
+};
+
 int main(int argc, char* argv[]) {
     if (argc < 1) {
         ExitError("Please specify a path to the file. ");
@@ -74,6 +79,8 @@ int main(int argc, char* argv[]) {
     if (!file.is_open()) {
         ExitError("Cannot locate or open file.");
     }
+
+    auto start = std::chrono::high_resolution_clock::now();
 
     //Predefine a vector storing all functions
     vector<Func> funcVec;
@@ -101,7 +108,7 @@ int main(int argc, char* argv[]) {
     }
 
     //Secondly, parse the lines and store them in a parsedLines vector.
-    vector<std::pair<int, string>> parsedLines;
+    vector<pair<int, string>> parsedLines; vector<pair<int, string>> statementVec;
     for (const auto&[lineNum, l] : lines) {
         auto parsed = Parse(l);
 
@@ -109,32 +116,107 @@ int main(int argc, char* argv[]) {
             continue;
 
         //After seperating semicolons, trim them to get rid of any whitespace inbetween.
-        for (const string& x : parsed)
-            parsedLines.push_back({ lineNum, TrimWhitespace(x) });
-    }
-    lines.clear();
+        for (const string& x : parsed) {
+            //Thirdly, resolve control flow statements
+            string parsedLine = TrimWhitespace(x); auto tokens = Tokenize(l); string statementName = tokens[0];
+            if (statementName == "for") {
+                //A for loop always has at least 13 tokens
+                if (tokens.size() < 12)
+                    ExitError("Invalid args in for-loop initialization on line " + to_string(lineNum));
 
-    //Iterate through every line (for the 3rd time). Resolve ifs and store the label line locations
-    vector<pair<int, int>> ifVec;
+                if (tokens.back() != ":")
+                    ExitError("Invalid for-loop initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+
+                //For each for-loop segment, parse it and also validate the syntax
+                string initializer = "", condition = "", iteration = ""; int index = 1;
+                for (int i = index; tokens[i] != ","; i++, index++) {
+                    if (i == tokens.size() - 1)
+                        ExitError("Invalid for-loop initialization. Expected: ',' on line " + to_string(lineNum));
+                    initializer += tokens[i];
+                }
+                index++;
+                for (int i = index; tokens[i] != ","; i++, index++) {
+                    if (i == tokens.size() - 1)
+                        ExitError("Invalid for-loop initialization. Expected: ',' on line " + to_string(lineNum));
+                    condition += tokens[i];
+                }
+                index++;
+                for (int i = index; tokens[i] != ":"; i++)
+                    iteration += tokens[i];
+
+                if(initializer.empty() || condition.empty() || iteration.empty())
+                    ExitError("Invalid for-loop initialization. Segments not defined properly on line" + to_string(lineNum));
+               
+                int endIndex = lineNum;
+                //Insert all of the necessary lines 
+                parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
+                parsedLines.push_back({ lineNum,  "=FOR_" + to_string(endIndex) + ";"});
+                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
+                statementVec.push_back({ lineNum, iteration + ";jump: FOR_" + to_string(endIndex)
+                                                  + ";=END_" + to_string(endIndex) + ";delete: " + tokens[1] + ";" });
+            }
+            else if (statementName == "while") {
+                if (tokens.size() < 5)
+                    ExitError("Invalid args in while-loop initialization on line " + to_string(lineNum));
+
+                if (tokens.back() != ":")
+                    ExitError("Invalid while-loop initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+                
+                string condition = "";
+                for (int i = 1; tokens[i] != ":"; i++) {
+                    condition += tokens[i];
+                }
+
+                if (condition.empty())
+                    ExitError("Invalid while-loop initialization. Condition not defined properly on line" + to_string(lineNum));
+
+                int endIndex = lineNum;
+                parsedLines.push_back({ lineNum,  "=WHILE_" + to_string(endIndex) + ";" });
+                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
+                statementVec.push_back({ lineNum, "jump: WHILE_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";"});
+            }
+            else if (statementName == "if") {
+                if (tokens.size() < 5)
+                    ExitError("Invalid args in if-statement initialization on line " + to_string(lineNum));
+
+                if (tokens.back() != ":")
+                    ExitError("Invalid if-statement initialization. Got '" + tokens.back() + "' Expected: ':' on line " + to_string(lineNum));
+
+                int endIndex = lineNum;
+                //Remove colon
+                parsedLine.pop_back();
+                //Modify if-statement, in order to jump to the corresponding end if false.
+                parsedLine += ", END_" + to_string(endIndex) + ";";
+                parsedLines.push_back({ lineNum, parsedLine });
+                statementVec.push_back({ lineNum, "=END_" + to_string(endIndex) + ";" });
+            }
+            else if (statementName == "end") {
+                if(statementVec.size() == 0)
+                    ExitError("Received hanging end-statement on line " + to_string(lineNum));
+                //Modify line to the last entry in the statementVec
+                parsedLine = statementVec.back().second;
+
+                for(const auto& s : SplitString(parsedLine, ';'))
+                    parsedLines.push_back({ lineNum, s + ";"});
+
+                //Remove the entry in the statementVec
+                statementVec.pop_back();
+            }
+            else {
+                parsedLines.push_back({ lineNum, parsedLine });
+            }
+        }
+    }
+
+    //If any statements are still in vec, no end was received.
+    if (statementVec.size() > 0)
+        ExitError("If-statement did not receive end on line " + to_string(statementVec.front().first));
+
+    lines.clear(); statementVec.clear();
+
+    //Fouth, resolve label names
     for (int i = 0; i < parsedLines.size(); i++) {
         string l = parsedLines[i].second; int lineNum = parsedLines[i].first;
-
-        //If the line starts with an if
-        if (l.rfind("if", 0) == 0) {
-            //push the line of the if-statement to the ifVec
-            ifVec.push_back({ i, lineNum });
-            //Remove semicolon
-            parsedLines[i].second.pop_back();
-            //Modify if-statement, in order to jump to the corresponding end if false.
-            parsedLines[i].second += ", END" + to_string(i) + ";";
-        }
-
-        if (l == "end;") {
-            //Modify line to the same jump-statement defined in the corresponding if. 
-            parsedLines[i].second = "=END" + to_string(ifVec.back().first) + ";"; l = parsedLines[i].second;
-            //Remove the entry in the ifVec
-            ifVec.pop_back();
-        }
 
         if (l[0] != '=') continue;
         if (l.back() != ';') ExitError("Expected semicolon on label initialization. Got: '" + l + "'");
@@ -147,16 +229,13 @@ int main(int argc, char* argv[]) {
         blacklist.push_back(label);
     }
 
-    //If any if-statements are still in vec, no end was received.
-    if (ifVec.size() > 0)
-        ExitError("If-statement did not receive end on line " + to_string(ifVec.front().second));
-
     //Function that searches though memory and returns the value of a variable given its name.
     auto FindVar = [&memory, &errorLevel](const string& varName, string& value, int& valueType) {
         //Edge case: errorType.
         if (varName == "errorLevel") {
             value = to_string(errorLevel);
             valueType = INT;
+            return true;
         }
 
         auto found = memory.find(varName);
@@ -283,7 +362,7 @@ int main(int argc, char* argv[]) {
         cout << FormatString(v[0]); FindFunc("input")(vector<string> { v[1] });
     }));
 
-    funcVec.push_back(Func("var", OpTypes{ SPACE, ARG, SET, ARG }, [&](vector<string> v) {
+    funcVec.push_back(Func("var", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
         string name = v[0]; string value = v[1]; int valueType = 0;
         ResolveValue(value, valueType);
 
@@ -295,7 +374,7 @@ int main(int argc, char* argv[]) {
     }));
 
     //Overload: Define variable, but do not initialize it
-    funcVec.push_back(Func("var", OpTypes{ SPACE, ARG }, [&](vector<string> v) {
+    funcVec.push_back(Func("var", OpTypes{  ARG }, [&](vector<string> v) {
         string name = v[0];
         ValidateVarName(name);
 
@@ -304,7 +383,7 @@ int main(int argc, char* argv[]) {
 
     //Sets a variable to a value
     //the final line should look like [VarName] var1 = value, thus having an additional 0 prepended.
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, SET, ARG }, [&](vector<string> v) {
+    funcVec.push_back(Func("[VarName]", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
         string name = v[0]; string nameValue = ""; int nameType = 0;
         string value = v[1]; int valueType = 0; ResolveValue(value, valueType);
 
@@ -327,7 +406,7 @@ int main(int argc, char* argv[]) {
     }));
 
     //Modifying a variable
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, MOD, ARG }, [&](vector<string> v) {
+    funcVec.push_back(Func("[VarName]", OpTypes{ ARG, MOD, ARG }, [&](vector<string> v) {
         string name = v[0]; string nameValue = ""; int nameType = 0;
         string value = v[2]; int valueType = 0; ResolveValue(value, valueType);
         string op = v[1];
@@ -381,7 +460,7 @@ int main(int argc, char* argv[]) {
     }));
 
     //Incrementing or decrementing variable
-    funcVec.push_back(Func("[VarName]", OpTypes{ SPACE, ARG, MOD }, [&](vector<string> v) {
+    funcVec.push_back(Func("[VarName]", OpTypes{ ARG, MOD }, [&](vector<string> v) {
         string name = v[0], value = ""; int type = 0;
         string op = v[1];
 
@@ -404,6 +483,28 @@ int main(int argc, char* argv[]) {
 
         //Code efficient, albeit scuffed solution
         if (type == INT)
+            memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
+    }));
+
+    //Modifying a variable
+    funcVec.push_back(Func("sqrt", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+        string name = v[0]; string nameValue = ""; int nameType = 0;
+
+        //if the name doesn't get found
+        if (!FindVar(name, nameValue, nameType))
+            throw std::exception(("Sqrt received a literal or undefined variable. Got: '" + name + "'").c_str());
+
+        //If it isn't the same type, or number type.
+        if (nameType != DOUBLE && nameType != INT)
+            throw std::exception(("Square root operation received wrong type. Got: '" + IntToType(nameType) + "'").c_str());
+
+        //Get the data from memory
+        double data = stod(memory.at(name).GetData());
+
+        memory[name].SetData(to_string(sqrt(data)));
+        
+        //Code efficient, albeit scuffed solution, converts double to int 
+        if (nameType == INT)
             memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
     }));
 
@@ -452,7 +553,7 @@ int main(int argc, char* argv[]) {
         parsedLineIndex = callHistory.back(); callHistory.pop_back();
     }));
 
-    funcVec.push_back(Func("if", OpTypes{ COLON, ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
+    funcVec.push_back(Func("if", OpTypes{ ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
         string value1 = v[0]; int value1Type = 0;
         string op = v[1];
         string value2 = v[2]; int value2Type = 0;
@@ -495,7 +596,7 @@ int main(int argc, char* argv[]) {
     for (const auto& a : funcVec)
         blacklist.push_back(a.GetName());
 
-    //Thirdly, tokenize each line and go through the actual interpretation process. 
+    //Fifth, tokenize each line and go through the actual interpretation process. 
     for (parsedLineIndex; parsedLineIndex < parsedLines.size(); parsedLineIndex++) {
         int lineNum = parsedLines[parsedLineIndex].first; string l = parsedLines[parsedLineIndex].second;
 
@@ -535,9 +636,8 @@ int main(int argc, char* argv[]) {
             if (f.GetName() != funcName) continue; bFound = true;
             OpTypes argTypes = f.GetTypes();  
             //Subtract the count of type-0 argTypes from the final total, in order to skip over whitespace
-            int whitespaceArgs = std::count(argTypes.cbegin(), argTypes.cend(), 0);
             //Get the total amount of tokens the function should have
-            int tokenCount = argTypes.size() - whitespaceArgs + 2;
+            int tokenCount = argTypes.size() + 2;
 
             //Make sure the function has the correct amount of tokens, if not continue
             if (tokenCount != tokens.size())
@@ -549,14 +649,9 @@ int main(int argc, char* argv[]) {
             for (int i = 1; i < tokens.size() - 1; i++) {
                 string token = tokens[i]; int argType = argTypes[argTypeIndex];
 
-                //As argType 0 is whitespace, which is not saved in the tokenizing process, skip to the next arg. 
-                if (argType == 0)
-                    argType = argTypes[++argTypeIndex];
-
                 if (argType == ARG)
                     args.push_back(token);
-                //If it is not an argument
-                else {
+                else { //If it is not an argument
                     //Token has to be a valid seperator, and of the same opType
                     auto found = separators.find(token);
                     if (found == separators.cend())
@@ -597,6 +692,11 @@ int main(int argc, char* argv[]) {
         if(bFound && !bFinished)
             ExitError("No function overload of function '" + funcName + "' matches argument list on line " + to_string(lineNum));
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+   cout << endl << "Program sucessfully executed. Exited with code 0." <<  endl <<
+       "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
    
     file.close();
     return 0;
