@@ -7,7 +7,7 @@
 using std::cout; using std::endl; using std::to_string; using std::pair; using std::make_pair;
 
 void ExitError(const string& error) noexcept {
-    std::cerr << '\n' << error << endl;
+    std::cerr << '\n' << error << "." << endl;
     exit(-1);
 }
 
@@ -153,9 +153,9 @@ int main(int argc, char* argv[]) {
         //After seperating semicolons, trim them to get rid of any whitespace inbetween.
         for (const string& x : parsed) {
             //Thirdly, resolve control flow statements
-            string parsedLine = TrimWhitespace(x); auto tokens = Tokenize(l); string statementName = tokens[0];
+            string parsedLine = TrimWhitespace(x); auto tokens = Tokenize(parsedLine); string statementName = tokens[0];
             if (statementName == "for") {
-                //A for loop always has at least 13 tokens
+                //A for loop always has at least 10 tokens
                 if (tokens.size() < 12)
                     ExitError("Invalid args in for-loop initialization on line " + to_string(lineNum));
 
@@ -167,7 +167,7 @@ int main(int argc, char* argv[]) {
                 for (int i = index; tokens[i] != ","; i++, index++) {
                     if (i == tokens.size() - 1)
                         ExitError("Invalid for-loop initialization. Expected: ',' on line " + to_string(lineNum));
-                    initializer += tokens[i];
+                    initializer += tokens[i] + " ";
                 }
                 index++;
                 for (int i = index; tokens[i] != ","; i++, index++) {
@@ -186,7 +186,7 @@ int main(int argc, char* argv[]) {
                 //Insert all of the necessary lines 
                 string endStatement = iteration + ";jump: FOR_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";delete: " + tokens[1] + ";";
                 string jumpBegin = "FOR_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
-                parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
+                parsedLines.push_back({ lineNum,  "var "+ initializer + ";"});
                 parsedLines.push_back({ lineNum,   "=" + jumpBegin + ";"});
                 parsedLines.push_back({ lineNum,  "if " + condition + "," + jumpEnd + ";" });
                 statementVec.push_back(ControlFlow(lineNum, "for", jumpBegin, jumpEnd, endStatement));
@@ -232,11 +232,11 @@ int main(int argc, char* argv[]) {
                 if(tokens[1] != ";")
                     ExitError("Expected ';' after break-statement on line " + to_string(lineNum));
 
-                auto found = std::find_if(statementVec.cbegin(), statementVec.cend(), [](const ControlFlow& s) {
+                auto found = std::find_if(statementVec.crbegin(), statementVec.crend(), [](const ControlFlow& s) {
                     return s.GetType() != "if";
                 });
 
-                if(found == statementVec.cend())
+                if(found == statementVec.crbegin())
                     ExitError("A break-statement can only be used within a loop on line " + to_string(lineNum));
 
                 parsedLines.push_back({ lineNum, "jump: " + (*found).GetJumpEnd() + ";" });
@@ -245,16 +245,15 @@ int main(int argc, char* argv[]) {
                 if (tokens[1] != ";")
                     ExitError("Expected ';' after continue-statement on line " + to_string(lineNum));
 
-                auto found = std::find_if(statementVec.cbegin(), statementVec.cend(), [](const ControlFlow& s) {
+                auto found = std::find_if(statementVec.rbegin(), statementVec.rend(), [](const ControlFlow& s) {
                     return s.GetType() != "if";
                 });
 
-                if (found == statementVec.cend())
+                if (found == statementVec.rbegin())
                     ExitError("A continue-statement can only be used within a loop on line " + to_string(lineNum));
 
-                ControlFlow loop = *found;
                 //Modify the endStatement accordingly
-                loop.SetEndStatement("=CONT_" + to_string(lineNum) + ";" + loop.GetEndStatement());
+                found->SetEndStatement("=CONT_" + to_string(lineNum) + ";" + found->GetEndStatement());
                 parsedLines.push_back({ lineNum, "jump: CONT_" +  to_string(lineNum) + ";" });
             }
             else if (statementName == "end") {
@@ -385,6 +384,7 @@ int main(int argc, char* argv[]) {
 
         if (func == funcSet.cend())
             throw std::exception(("No overload for function '" + funcName + "' matches types: " + error).c_str());
+        
 
         return (*func).GetImplementation();
     };
@@ -577,7 +577,8 @@ int main(int argc, char* argv[]) {
             // Code efficient, albeit scuffed solution
             if (type == INT)
                 memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
-        })
+        }),
+
     }});
 
     funcMap.insert({ "sqrt", vector<Func> {
@@ -702,7 +703,6 @@ int main(int argc, char* argv[]) {
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for(const auto& [lineNum, l] : parsedLines) {
         vector<string> tokens;
-        
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
@@ -752,6 +752,9 @@ int main(int argc, char* argv[]) {
             functions.push_back({ lineNum, args, FindFunc(funcName, argTypes) });
         }
         catch (const std::exception& e) {
+            //Specialized error message for [VarName] as it indicates a non-function funcName
+            if (funcName == "[VarName]")
+                ExitError("No function or identifier by the name '" + tokens[1] + "' found on line " + to_string(lineNum));
             ExitError(string(e.what()) + " on line " + to_string(lineNum));
         }
     }

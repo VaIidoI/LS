@@ -37,24 +37,30 @@ int GetDataType(const string& line) {
     if (line == "true" || line == "false")
         return BOOL;
 
-    //Check for int, if index is on last character, it means all characters are numbers
-    for (int i = 0; i <= line.size(); i++) {
-        if (i == line.size()) return INT;
-        if (!isdigit(line[i]))  break;
-    }
+    //Check for string
+    if (line[0] == '"' && line.back() == '"')
+        return STRING;
 
-    //Check for double, if index is on last character, it means all characters are numbers or a dot
-    int dotCount = 0;
+    int minusCount = 0; int dotCount = 0;
     for (int i = 0; i <= line.size(); i++) {
-        if (i == line.size() && dotCount == 1) return DOUBLE;
+        //Check for int, if index is on last character, it means all characters are numbers, no dots.
+        if (i == line.size() && dotCount == 0) {
+            //Make sure that there's only 1 or less minus
+            if (minusCount > 1) break;
+            return INT;
+        }
+        //Check for double, if index is on last character, it means all characters are numbers. Exactly 1 dot and 1 minus
+        if (i == line.size() && dotCount == 1) {
+            //Make sure that there's only 1 or less minus
+            if (minusCount > 1) break;
+            return DOUBLE;
+        }
+        if (line[i] == '-') { ++minusCount; continue; }
         if (line[i] == '.') { ++dotCount; continue; }
         if (!isdigit(line[i]))  break;
     }
 
-    if (line[0] == '"' && line.back() == '"')
-        return STRING;
-
-    return 0;
+    return ERROR;
 }
 
 #endif // !DATA_TYPES
