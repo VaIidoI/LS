@@ -71,9 +71,10 @@ vector<string> SplitString(const string& s, const char& delimiter) {
         ret.back() += c;
     }
 
-    if (ret.back() == string())
-        ret.pop_back();
-
+    //Remove any lines that are whitespace
+    for (int i = 0; i < ret.size(); i++)
+        if (TrimWhitespace(ret[i]).empty())
+            ret.erase(ret.begin() + i);
     return ret;
 }
 

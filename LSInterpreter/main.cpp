@@ -63,6 +63,46 @@ private:
     int type_; string data_;
 };
 
+class ControlFlow {
+public:
+    ControlFlow() = default;
+
+    ControlFlow(const int& line, const string& type, const string& endStatement) :
+        line_(line), type_(type), endStatement_(endStatement), jumpBegin_("") {}
+
+    ControlFlow(const int& line, const string& type, const string& jumpBegin, const string& jumpEnd, const string& endStatement) :
+        line_(line), type_(type), jumpBegin_(jumpBegin), jumpEnd_(jumpEnd), endStatement_(endStatement) {}
+
+    //Getters
+    int GetLine() const {
+        return line_;
+    }
+
+    string GetType() const {
+        return type_;
+    }
+
+    string GetEndStatement() {
+        return endStatement_;
+    }
+
+    string GetJumpBegin() const {
+        return jumpBegin_;
+    }
+
+    string GetJumpEnd() const {
+        return jumpEnd_;
+    }
+
+    //Setters
+    void SetEndStatement(const string& endStatement) {
+        endStatement_ = endStatement;
+    }
+
+private:
+    int line_; string type_, jumpBegin_, jumpEnd_, endStatement_;
+};
+
 int main(int argc, char* argv[]) {
     if (argc < 1) {
         ExitError("Please specify a path to the file. ");
@@ -88,13 +128,13 @@ int main(int argc, char* argv[]) {
 
     //Create a map storing the label's location along with a vector storing the line "history"
     //Also create a lineIndex to keep track of the current line.
-    std::map<string, int> labelMap; vector<int> callHistory; int parsedLineIndex = 0;
+    std::unordered_map<string, int> labelMap; vector<int> callHistory; int parsedLineIndex = 0;
 
     //ErrorLevel is a flag that indicates if certain functions encountered any errors
     int errorLevel = 0;
 
     //Firstly, get the lines and remove any whitespace, while ignoring empty lines. Also store the actual line.  
-    vector<std::pair<int, string>> lines; int lineIndex = 0;
+    vector<pair<int, string>> lines; int lineIndex = 0;
     while (getline(file, line)) {
         ++lineIndex;
         line = TrimWhitespace(line);
@@ -103,7 +143,7 @@ int main(int argc, char* argv[]) {
     }
 
     //Secondly, parse the lines and store them in a parsedLines vector.
-    vector<pair<int, string>> parsedLines; vector<pair<int, string>> statementVec;
+    vector<pair<int, string>> parsedLines; vector<ControlFlow> statementVec;
     for (const auto&[lineNum, l] : lines) {
         auto parsed = Parse(l);
 
@@ -144,11 +184,12 @@ int main(int argc, char* argv[]) {
                
                 int endIndex = lineNum;
                 //Insert all of the necessary lines 
+                string endStatement = iteration + ";jump: FOR_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";delete: " + tokens[1] + ";";
+                string jumpBegin = "FOR_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
                 parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
-                parsedLines.push_back({ lineNum,  "=FOR_" + to_string(endIndex) + ";"});
-                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
-                statementVec.push_back({ lineNum, iteration + ";jump: FOR_" + to_string(endIndex)
-                                                  + ";=END_" + to_string(endIndex) + ";delete: " + tokens[1] + ";" });
+                parsedLines.push_back({ lineNum,   "=" + jumpBegin + ";"});
+                parsedLines.push_back({ lineNum,  "if " + condition + "," + jumpEnd + ";" });
+                statementVec.push_back(ControlFlow(lineNum, "for", jumpBegin, jumpEnd, endStatement));
             }
             else if (statementName == "while") {
                 if (tokens.size() < 5)
@@ -166,9 +207,11 @@ int main(int argc, char* argv[]) {
                     ExitError("Invalid while-loop initialization. Condition not defined properly on line" + to_string(lineNum));
 
                 int endIndex = lineNum;
-                parsedLines.push_back({ lineNum,  "=WHILE_" + to_string(endIndex) + ";" });
-                parsedLines.push_back({ lineNum,  "if " + condition + ", END_" + to_string(endIndex) + ";" });
-                statementVec.push_back({ lineNum, "jump: WHILE_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";"});
+                string jumpBegin = "WHILE_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
+                parsedLines.push_back({ lineNum,  "="  + jumpBegin + ";" });
+                parsedLines.push_back({ lineNum,  "if " + condition + "," + jumpEnd + ";" });
+                string endStatement = "jump: WHILE_" + to_string(endIndex) + ";=END_" + to_string(endIndex) + ";";
+                statementVec.push_back(ControlFlow(lineNum, "while", jumpBegin, jumpEnd, endStatement));
             }
             else if (statementName == "if") {
                 if (tokens.size() < 5)
@@ -183,15 +226,44 @@ int main(int argc, char* argv[]) {
                 //Modify if-statement, in order to jump to the corresponding end if false.
                 parsedLine += ", END_" + to_string(endIndex) + ";";
                 parsedLines.push_back({ lineNum, parsedLine });
-                statementVec.push_back({ lineNum, "=END_" + to_string(endIndex) + ";" });
+                statementVec.push_back(ControlFlow(lineNum, "if", "=END_" + to_string(endIndex) + "; "));
+            }
+            else if (statementName == "break") {
+                if(tokens[1] != ";")
+                    ExitError("Expected ';' after break-statement on line " + to_string(lineNum));
+
+                auto found = std::find_if(statementVec.cbegin(), statementVec.cend(), [](const ControlFlow& s) {
+                    return s.GetType() != "if";
+                });
+
+                if(found == statementVec.cend())
+                    ExitError("A break-statement can only be used within a loop on line " + to_string(lineNum));
+
+                parsedLines.push_back({ lineNum, "jump: " + (*found).GetJumpEnd() + ";" });
+            }
+            else if (statementName == "continue") {
+                if (tokens[1] != ";")
+                    ExitError("Expected ';' after continue-statement on line " + to_string(lineNum));
+
+                auto found = std::find_if(statementVec.cbegin(), statementVec.cend(), [](const ControlFlow& s) {
+                    return s.GetType() != "if";
+                });
+
+                if (found == statementVec.cend())
+                    ExitError("A continue-statement can only be used within a loop on line " + to_string(lineNum));
+
+                ControlFlow loop = *found;
+                //Modify the endStatement accordingly
+                loop.SetEndStatement("=CONT_" + to_string(lineNum) + ";" + loop.GetEndStatement());
+                parsedLines.push_back({ lineNum, "jump: CONT_" +  to_string(lineNum) + ";" });
             }
             else if (statementName == "end") {
                 if(statementVec.size() == 0)
                     ExitError("Received hanging end-statement on line " + to_string(lineNum));
                 //Modify line to the last entry in the statementVec
-                parsedLine = statementVec.back().second;
+                parsedLine = statementVec.back().GetEndStatement();
 
-                for(const auto& s : SplitString(parsedLine, ';'))
+                for (const auto& s : SplitString(statementVec.back().GetEndStatement(), ';'))
                     parsedLines.push_back({ lineNum, s + ";"});
 
                 //Remove the entry in the statementVec
@@ -205,9 +277,9 @@ int main(int argc, char* argv[]) {
 
     //If any statements are still in vec, no end was received.
     if (statementVec.size() > 0)
-        ExitError("If-statement did not receive end on line " + to_string(statementVec.front().first));
+        ExitError("If-statement did not receive end on line " + to_string(statementVec.front().GetLine()));
 
-    lines.clear(); statementVec.clear();
+    lines.clear();
 
     //Fouth, resolve label names
     for (int i = 0; i < parsedLines.size(); i++) {
@@ -629,13 +701,8 @@ int main(int argc, char* argv[]) {
 
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for(const auto& [lineNum, l] : parsedLines) {
-        //If callHistory has entries which are larger than parsedLineIndex, delete them, due to them being from past jumps
-        auto onLine = std::find_if(callHistory.begin(), callHistory.end(), [parsedLineIndex](int index) { return parsedLineIndex <= index;  });
-        if (onLine != callHistory.cend())
-            callHistory.erase(onLine, callHistory.end());
-
         vector<string> tokens;
-
+        
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
@@ -690,7 +757,12 @@ int main(int argc, char* argv[]) {
     }
 
     //Execute the functions
-    for (parsedLineIndex; parsedLineIndex < functions.size(); parsedLineIndex++) {
+    for (; parsedLineIndex < functions.size(); parsedLineIndex++) {
+        //If callHistory has entries which are larger than parsedLineIndex, delete them, due to them being from past jumps
+        auto onLine = std::find_if(callHistory.begin(), callHistory.end(), [parsedLineIndex](int index) { return parsedLineIndex <= index;  });
+        if (onLine != callHistory.cend())
+            callHistory.erase(onLine, callHistory.end());
+
         int lineNum = std::get<0>(functions[parsedLineIndex]);
         //Label
         if (lineNum == -1)
@@ -703,7 +775,7 @@ int main(int argc, char* argv[]) {
             func(args);
         }
         catch (const std::exception& e) {
-            cout << e.what() << " on line " << to_string(parsedLineIndex);
+            ExitError(e.what() + string(" on line ") + to_string(parsedLineIndex));
         }
     }
 
