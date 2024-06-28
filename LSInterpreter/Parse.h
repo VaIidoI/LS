@@ -36,11 +36,11 @@ std::string IntToOpType(const int& type) {
     case 0:
         return "Argument";
     case 1:
-        return "':'";
+        return ":";
     case 2:
-        return "','";
+        return ",";
     case 3:
-        return "'='";
+        return "=";
     case 4:
         return "Modification character";
     case 5:

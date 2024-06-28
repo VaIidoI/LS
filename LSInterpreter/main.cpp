@@ -258,7 +258,7 @@ int main(int argc, char* argv[]) {
         if (type == ERROR) {
             string varName = value;
             if (!FindVar(varName, value, type))
-                throw std::exception(("Function received undefined variable '" + value + "'").c_str());
+                throw std::exception(("Function received undefined identifier '" + value + "'").c_str());
             //If the type is STILL nothing, it is an uninitialized variable
             if(type == ERROR)
                 throw std::exception(("Function received uninitialized variable '" + value + "'").c_str());
@@ -273,7 +273,7 @@ int main(int argc, char* argv[]) {
 
         //Name should not be in blacklist
         if (std::find(blacklist.cbegin(), blacklist.cend(), varName) != blacklist.cend())
-            throw std::exception(("Variable initialization received illegal variable name. " + string("Got: '") + varName + "'").c_str());
+            throw std::exception(("Variable initialization received illegal identifier. " + string("Got: '") + varName + "'").c_str());
 
         //Name should not be all numbers
         bool bNumber = true;
@@ -359,7 +359,7 @@ int main(int argc, char* argv[]) {
             errorLevel = 0;
 
             if (!FindVar(name, value, type))
-                throw std::exception(("Input received undefined variable '" + name + "'").c_str());
+                throw std::exception(("Input received undefined identifier '" + name + "'").c_str());
 
             // Get the line and its datatype. If it's errortype, it becomes a string, due to it not being anything else
             string s = ""; std::getline(std::cin, s); int lineType = GetDataType(s);
@@ -416,7 +416,7 @@ int main(int argc, char* argv[]) {
 
             // if the name doesn't get found
             if (!FindVar(name, nameValue, nameType))
-                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+                throw std::exception(("Setter received a literal or undefined identifier. Got: '" + name + "'").c_str());
 
             // Uninitialized variable as target, proceed accordingly
             if (nameType == ERROR) {
@@ -437,7 +437,7 @@ int main(int argc, char* argv[]) {
 
             // if the name doesn't get found
             if (!FindVar(name, nameValue, nameType))
-                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+                throw std::exception(("Setter received a literal or undefined identifier. Got: '" + name + "'").c_str());
 
             // If it isn't the same type, or number type.
             if (nameType != valueType && !(nameType == DOUBLE && valueType == INT) && !(nameType == INT && valueType == DOUBLE))
@@ -487,7 +487,7 @@ int main(int argc, char* argv[]) {
 
             // if the name doesn't get found
             if (!FindVar(name, value, type))
-                throw std::exception(("Setter received a literal or undefined variable. Got: '" + name + "'").c_str());
+                throw std::exception(("Setter received a literal or undefined identifier. Got: '" + name + "'").c_str());
 
             // If type is string or bool
             if (type == STRING || type == BOOL)
@@ -515,7 +515,7 @@ int main(int argc, char* argv[]) {
 
             // if the name doesn't get found
             if (!FindVar(name, nameValue, nameType))
-                throw std::exception(("Sqrt received a literal or undefined variable. Got: '" + name + "'").c_str());
+                throw std::exception(("Sqrt received a literal or undefined identifier. Got: '" + name + "'").c_str());
 
             // If it isn't the same type, or number type.
             if (nameType != DOUBLE && nameType != INT)
@@ -624,21 +624,24 @@ int main(int argc, char* argv[]) {
     for (const auto& a : funcVec)
         blacklist.insert(a.GetName());
 
-    //Fifth, tokenize each line and go through the actual interpretation process. 
-    for (parsedLineIndex; parsedLineIndex < parsedLines.size(); parsedLineIndex++) {
-        int lineNum = parsedLines[parsedLineIndex].first; string l = parsedLines[parsedLineIndex].second;
+    //Vector storing functions on each line. Int stores real line, vector<string> stores arg, function stores implementation
+    vector<std::tuple<int, vector<string>, std::function<void(const vector<string>&)>>> functions;
 
+    //Fifth, tokenize each line and go through the actual interpretation process. 
+    for(const auto& [lineNum, l] : parsedLines) {
         //If callHistory has entries which are larger than parsedLineIndex, delete them, due to them being from past jumps
         auto onLine = std::find_if(callHistory.begin(), callHistory.end(), [parsedLineIndex](int index) { return parsedLineIndex <= index;  });
-        if (onLine != callHistory.cend()) {
+        if (onLine != callHistory.cend())
             callHistory.erase(onLine, callHistory.end());
-        }
 
         vector<string> tokens;
 
         //Skip labels
-        if (l[0] == '=')
+        if (l[0] == '=') {
+            //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
+            functions.push_back({ -1, vector<string>{}, nullptr });
             continue;
+        }
 
         try {
             tokens = Tokenize(l);
@@ -653,11 +656,11 @@ int main(int argc, char* argv[]) {
         }
 
         string funcName = tokens[0];
-        //If funcName is the name of a variable, prepend the function that handles variable changes [VarName], in order to pass the variable name in args
-        if (memory.find(funcName) != memory.cend()) {
+        //If funcName is not a function, perhaps it is an identifier. Prepend [VarName] and set it as the function name. 
+        if (funcMap.find(funcName) == funcMap.cend()) {
             tokens.insert(tokens.begin(), "[VarName]"); funcName = "[VarName]";
         }
-        
+
         vector<string> args; OpTypes argTypes;
         //For each token, check its opType and push it back to the vector
         for (int i = 1; i < tokens.size() - 1; i++) {
@@ -677,19 +680,37 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        //Call the function
+        //Store the function in the function vector
         try {
-            auto f = FindFunc(funcName, argTypes); f(args);
+            functions.push_back({ lineNum, args, FindFunc(funcName, argTypes) });
         }
         catch (const std::exception& e) {
             ExitError(string(e.what()) + " on line " + to_string(lineNum));
         }
     }
 
+    //Execute the functions
+    for (parsedLineIndex; parsedLineIndex < functions.size(); parsedLineIndex++) {
+        int lineNum = std::get<0>(functions[parsedLineIndex]);
+        //Label
+        if (lineNum == -1)
+            continue;
+        auto args = std::get<1>(functions[parsedLineIndex]);
+        auto func = std::get<2>(functions[parsedLineIndex]);
+
+        try {
+            //Get the function implementation and pass in the args. Index 2 and 1 respectively
+            func(args);
+        }
+        catch (const std::exception& e) {
+            cout << e.what() << " on line " << to_string(parsedLineIndex);
+        }
+    }
+
     auto end = std::chrono::high_resolution_clock::now();
 
-   cout << endl << "Program sucessfully executed. Exited with code 0." <<  endl <<
-       "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
+    cout << endl << "Program sucessfully executed. Exited with code 0." <<  endl <<
+        "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
    
     file.close();
     return 0;
