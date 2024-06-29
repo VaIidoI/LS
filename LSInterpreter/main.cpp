@@ -151,7 +151,9 @@ int main(int argc, char* argv[]) {
             continue;
 
         //After seperating semicolons, trim them to get rid of any whitespace inbetween.
+        int index = 0;
         for (const string& x : parsed) {
+            ++index;
             //Thirdly, resolve control flow statements
             string parsedLine = TrimWhitespace(x); auto tokens = Tokenize(parsedLine); string statementName = tokens[0];
             if (statementName == "for") {
@@ -233,7 +235,7 @@ int main(int argc, char* argv[]) {
                     ExitError("Expected ';' after break-statement on line " + to_string(lineNum));
 
                 auto found = std::find_if(statementVec.crbegin(), statementVec.crend(), [](const ControlFlow& s) {
-                    return s.GetType() != "if";
+                    return s.GetType() != "if" && s.GetType() != "func";
                 });
 
                 if(found == statementVec.crbegin())
@@ -246,7 +248,7 @@ int main(int argc, char* argv[]) {
                     ExitError("Expected ';' after continue-statement on line " + to_string(lineNum));
 
                 auto found = std::find_if(statementVec.rbegin(), statementVec.rend(), [](const ControlFlow& s) {
-                    return s.GetType() != "if";
+                    return s.GetType() != "if" && s.GetType() != "func";
                 });
 
                 if (found == statementVec.rbegin())
@@ -255,6 +257,18 @@ int main(int argc, char* argv[]) {
                 //Modify the endStatement accordingly
                 found->SetEndStatement("=CONT_" + to_string(lineNum) + ";" + found->GetEndStatement());
                 parsedLines.push_back({ lineNum, "jump: CONT_" +  to_string(lineNum) + ";" });
+            }
+            else if (statementName == "func") {
+                string funcName = tokens[1];
+
+                if (tokens[2] != ":")
+                    ExitError("Expected ':' after function definition on line " + to_string(lineNum));
+
+                if(!statementVec.empty())
+                    ExitError("Cannot define a function within another statement on line " + to_string(lineNum));
+
+                parsedLines.push_back({ lineNum, "=" + funcName + ";" });
+                statementVec.push_back(ControlFlow(lineNum, "func", "return;"));
             }
             else if (statementName == "end") {
                 if(statementVec.size() == 0)
@@ -641,11 +655,29 @@ int main(int argc, char* argv[]) {
 
             int newLine = labelMap[name];
 
+            //Jump to the new line
+            parsedLineIndex = newLine;
+        })
+    }});
+
+    funcMap.insert({ "call", vector<Func> {
+        Func("call", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0]; int nameType = GetDataType(name);
+
+            // As labels can only be ErrorTypes, check for that
+            if (nameType != ERROR)
+                throw std::exception(("Tried to jump to literal or identifier of type '" + IntToType(nameType) + "'").c_str());
+
+            if (labelMap.find(name) == labelMap.cend())
+                throw std::exception(("Tried to jump to undefined label. Got: '" + name + "'").c_str());
+
+            int newLine = labelMap[name];
+
             // Push current line to callHistory and set index to newLine
             callHistory.push_back(parsedLineIndex);
             parsedLineIndex = newLine;
         })
-    }});
+} });
 
     funcMap.insert({ "return", vector<Func> {
         Func("return", OpTypes{}, [&](vector<string> v) {
@@ -703,6 +735,7 @@ int main(int argc, char* argv[]) {
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for(const auto& [lineNum, l] : parsedLines) {
         vector<string> tokens;
+
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
@@ -761,10 +794,9 @@ int main(int argc, char* argv[]) {
 
     //Execute the functions
     for (; parsedLineIndex < functions.size(); parsedLineIndex++) {
-        //If callHistory has entries which are larger than parsedLineIndex, delete them, due to them being from past jumps
-        auto onLine = std::find_if(callHistory.begin(), callHistory.end(), [parsedLineIndex](int index) { return parsedLineIndex <= index;  });
-        if (onLine != callHistory.cend())
-            callHistory.erase(onLine, callHistory.end());
+        //If parsedLineIndex is on the latest call, delete it to avoid duplicate calls. 
+        if (!callHistory.empty() && callHistory.back() == parsedLineIndex)
+            callHistory.erase(callHistory.begin() + parsedLineIndex);
 
         int lineNum = std::get<0>(functions[parsedLineIndex]);
         //Label
