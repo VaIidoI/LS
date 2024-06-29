@@ -18,7 +18,7 @@ int main(int argc, char* argv[]) {
         ExitError("Please specify a path to the file. ");
     }
 
-    std::ifstream file(argv[1]); string line;
+    std::ifstream file("test.ls"); string line;
 
     if (!file.is_open()) {
         ExitError("Cannot locate or open file.");
@@ -130,7 +130,7 @@ int main(int argc, char* argv[]) {
                 statementVec.push_back(ControlFlow(lineNum, "while", jumpBegin, jumpEnd, endStatement));
             }
             else if (statementName == "if") {
-                if (tokens.size() < 5)
+                if (tokens.size() < 3)
                     ExitError("Invalid args in if-statement initialization on line " + to_string(lineNum));
 
                 if (tokens.back() != ":")
@@ -194,10 +194,10 @@ int main(int argc, char* argv[]) {
                 if (tokens[tokens.size() - 2] != ")")
                     ExitError("Expected ')' in function definition on line " + to_string(lineNum));
 
-                vector<string> args; 
+                vector<string> args; string lastToken = "";
 
                 for (int i = 3; tokens[i] != ")"; i++) {
-                    string token = tokens[i]; 
+                    string token = tokens[i]; lastToken = token;
                     auto found = separators.find(token);
                     //Token is an argument
                     if (separators.find(token) == separators.cend()) {
@@ -210,6 +210,10 @@ int main(int argc, char* argv[]) {
                         continue;
                     }
                 }
+
+                //Make sure the last token was indeed an argument
+                if(lastToken == ",")
+                    ExitError("Expected argument got ',' on line " + to_string(lineNum));
 
                 functions.insert({ funcName, args.size() });
 
@@ -235,17 +239,17 @@ int main(int argc, char* argv[]) {
                 if (tokens.back() != ";")
                     ExitError("Expected ';' after calling function on line " + to_string(lineNum));
 
-                //2rd index should always be a open bracket
+                //2nd index should always be a open bracket
                 if (tokens[1] != "(")
                     ExitError("Expected '(' when calling function on line " + to_string(lineNum));
 
-                //2nd to last index should always be a closing bracket
-                if (tokens[tokens.size() - 2] != ")")
-                    ExitError("Expected ')' when calling function on line " + to_string(lineNum));
+                vector<string> args; int lastIndex = 2;
 
-                vector<string> args;
+                for (int i = 2; tokens[i] != ")"; i++, lastIndex++) {
+                    //No closing bracket was received, throw error
+                    if(i == tokens.size())
+                        ExitError("Expected ')' when calling function on line " + to_string(lineNum));
 
-                for (int i = 2; tokens[i] != ")"; i++) {
                     string token = tokens[i];
                     auto found = separators.find(token);
                     //Token is an argument
@@ -260,6 +264,8 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                if(tokens[lastIndex] == ",")
+                    ExitError("Expected argument got ',' on line " + to_string(lineNum));
                 //If function args do not match actual args
                 if(function.second != args.size())
                     ExitError("No instance of " + statementName + " takes " + to_string(args.size()) + " arguments on line " + to_string(lineNum));
@@ -269,6 +275,31 @@ int main(int argc, char* argv[]) {
                     parsedLines.push_back({ lineNum, "push: " + args[i] + ";"});
                 //Function calling
                 parsedLines.push_back({ lineNum, "call:" + statementName + ";" });
+
+                //Function return is getting assigned to a variable 
+                //the next 4 indices represent the variable assigning
+                if (lastIndex + 4 == tokens.size()) {
+                    if(tokens[lastIndex + 1] != ">>")
+                        ExitError("Expected: '>>' Got: '" + tokens[lastIndex + 1]  + "' on line " + to_string(lineNum));
+
+                    parsedLines.push_back({ lineNum, "var " + tokens[lastIndex + 2] + ";" });
+                    parsedLines.push_back({ lineNum, "pop: " + tokens[lastIndex + 2] + ";" });
+                }
+                //Throw an error if the value is above that
+                else if (lastIndex + 4 > tokens.size()) {
+                    ExitError("Invalid args provided when calling function on line " + to_string(lineNum));
+                }
+            }
+            //Return statements should only be within a function
+            else if (statementName == "return") {
+                auto found = std::find_if(statementVec.cbegin(), statementVec.cend(), [](const ControlFlow& s) {
+                    return s.GetType() == "func";
+                });
+
+                if (found == statementVec.cend())
+                    ExitError("A return-statement can only be used within a function on line " + to_string(lineNum));
+
+                parsedLines.push_back({ lineNum, parsedLine });
             }
             else if (statementName == "end") {
                 if(statementVec.size() == 0)
@@ -343,10 +374,10 @@ int main(int argc, char* argv[]) {
         if (type == ERROR) {
             string varName = value;
             if (!FindVar(varName, value, type))
-                throw std::exception(("Instruction received undefined identifier '" + value + "'").c_str());
+                throw std::exception(("Instruction received undefined identifier '" + varName + "'").c_str());
             //If the type is STILL nothing, it is an uninitialized variable
             if(type == ERROR)
-                throw std::exception(("Instruction received uninitialized variable '" + value + "'").c_str());
+                throw std::exception(("Instruction received uninitialized variable '" + varName + "'").c_str());
         }
     };
 
@@ -484,24 +515,33 @@ int main(int argc, char* argv[]) {
     instructions.insert({ "pop", vector<Instruction> {
         Instruction(OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0], value; int type = -1; 
+            //Reset errorLevel
+            errorLevel = 0;
 
             if (!FindVar(name, value, type))
                 throw std::exception(("Pop received undefined identifier '" + name + "'").c_str());
 
-            if(stack.empty())
-                throw std::exception("Tried popping while stack is empty");
+            if (stack.empty()) {
+                errorLevel = 1; return;
+            }
 
-            Var top = stack.top(); stack.pop();
+            int topType = stack.top().GetType();
+            string topData = stack.top().GetData();
+            stack.pop();
+
+            if (topType == STRING)
+                FormatString(topData);
+
             // Uninitialized variable as target, proceed accordingly
             if (type == ERROR) {
-                memory[name] = top;
+                memory[name] = Var(topData, topType);
                 return;
             }
 
-            if(type != top.GetType())
-                throw std::exception(("Pop received wrong type Got: '" + IntToType(type) + "' Expected: '" + IntToType(top.GetType())).c_str());
+            if(type != topType)
+                throw std::exception(("Pop received wrong type Got: '" + IntToType(type) + "' Expected: '" + IntToType(topType)).c_str());
             //Pop it to the variable
-            memory[name].SetData(top.GetData());
+            memory[name].SetData(topData);
         })
     }});
 
@@ -722,6 +762,18 @@ int main(int argc, char* argv[]) {
 
             // Set current line to latest entry and remove the entry. 
             parsedLineIndex = callHistory.back(); callHistory.pop_back();
+        }),
+        //Override: Return a variable
+        Instruction("return", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0];
+
+            //Push the variable to the stack
+            FindInstruction("push", OpTypes{ COLON, ARG })(vector<string> { name });
+            //Also delete the function
+            FindInstruction("delete", OpTypes{ COLON, ARG })(vector<string> { name });
+
+            // Set current line to latest entry and remove the entry. 
+            parsedLineIndex = callHistory.back(); callHistory.pop_back();
         })
     }});
 
@@ -757,6 +809,29 @@ int main(int argc, char* argv[]) {
             if ((op == "<" && value1d >= value2d) || (op == ">" && value1d <= value2d) || (op == ">=" && value1d < value2d) || (op == "<=" && value1d > value2d)) {
                 FindInstruction("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] });
             }
+        }),
+
+        //Override: If bool is true or variable is initialized
+        Instruction("if", OpTypes{ ARG, COMMA, ARG }, [&](vector<string> v) {
+            string name = v[0], value = ""; int type = GetDataType(name);
+            if(type == ERROR && !FindVar(name, value, type))
+                throw std::exception(("If statement received undefined identifier '" + name + "'").c_str());
+
+            //If the type is bool and it isn't true or if the type is errorType, jump to end
+            if ((type == BOOL && value != "true") || (type == ERROR)) {
+                FindInstruction("jump", OpTypes{ COLON, ARG })(vector<string> { v[1] });
+            }
+        }),
+        //Override: If bool is true or variable is initialized
+        Instruction("if", OpTypes{ NEG, ARG, COMMA, ARG }, [&](vector<string> v) {
+            string name = v[0], value = ""; int type = GetDataType(name);
+            if (type == ERROR && !FindVar(name, value, type))
+                throw std::exception(("If statement received undefined identifier '" + name + "'").c_str());
+
+            //If the type is bool and it is true or if the type isn't errorType, jump to end
+            if ((type == BOOL && value == "true") || (type != ERROR)) {
+                FindInstruction("jump", OpTypes{ COLON, ARG })(vector<string> { v[1] });
+            }
         })
     }});
 
@@ -770,7 +845,6 @@ int main(int argc, char* argv[]) {
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for(const auto& [lineNum, l] : parsedLines) {
         vector<string> tokens;
-        // cout << l << endl;
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
@@ -791,10 +865,13 @@ int main(int argc, char* argv[]) {
         }
 
         string funcName = tokens[0];
+
         //If funcName is not a function, perhaps it is an identifier. Prepend [VarName] and set it as the function name. 
         if (instructions.find(funcName) == instructions.cend()) {
             tokens.insert(tokens.begin(), "[VarName]"); funcName = "[VarName]";
         }
+
+        
 
         vector<string> args; OpTypes argTypes;
         //For each token, check its opType and push it back to the vector
@@ -810,7 +887,7 @@ int main(int argc, char* argv[]) {
                 int argType = (*found).second;
                 argTypes.push_back(argType);
                 //As opTypes 2 and below are unambiguous, do not push them
-                if(argType > 3)
+                if(argType > 4)
                     args.push_back(token);
             }
         }

@@ -33,6 +33,8 @@ int StringToType(const string& s) {
 }
 
 int GetDataType(const string& line) {
+    if (line.empty())
+        return ERROR;
     //Check for bool
     if (line == "true" || line == "false")
         return BOOL;

@@ -21,18 +21,24 @@ using std::vector; using std::string; using std::to_string;
 //  5. Logical comparators like '==' and '>='
 using OpTypes = vector<int>;
 const enum OpType {
-    ARG = 0,              
-    COLON = 1,         
-    COMMA = 2,         
-    SET = 3,           
-    MOD = 4,  
-    LOGIC = 5,
-    BRACK = 6
+    ARG = 0,
+    COLON = 1,
+    COMMA = 2,
+    NEG = 3,
+    SET = 4,
+    MOD = 5,
+    LOGIC = 6,
+    BRACK = 7,
+    SHIFT = 8
 };
-const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5}, {"(", 6}, { ")", 6 } };
 
+const std::unordered_map<std::string, int> separators = {
+    {":", 1}, {",", 2}, {"!", 3}, {"=", 4}, {"++", 5}, {"--", 5}, {"+=", 5},
+    {"-=", 5}, {"*=", 5}, {"/=", 5}, {"%=", 5}, {"==", 6}, {"!=", 6}, {"<", 6},
+    {">", 6}, {"<=", 6}, {">=", 6}, {"(", 7}, {")", 7}, {">>", 8}, {"<<", 8}
+};
 
-std::string IntToOpType(const int& type) {
+string IntToOpType(const int& type) {
     switch (type) {
     case 0:
         return "Argument";
@@ -41,17 +47,22 @@ std::string IntToOpType(const int& type) {
     case 2:
         return ",";
     case 3:
-        return "=";
+        return "!";
     case 4:
-        return "Modification character";
+        return "=";
     case 5:
-        return "Logical comparator";
+        return "Modification character";
     case 6:
+        return "Logical comparator";
+    case 7:
         return "Brackets";
+    case 8:
+        return "Shifts";
     default:
         return "Unknown type";
     }
 }
+
 
 //Returns: Trimmed string | Trims trailing and leading whitespace from string
 string TrimWhitespace(const string& line)
