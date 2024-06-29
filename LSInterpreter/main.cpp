@@ -18,7 +18,7 @@ int main(int argc, char* argv[]) {
         ExitError("Please specify a path to the file. ");
     }
 
-    std::ifstream file("test.ls"); string line;
+    std::ifstream file(argv[1]); string line;
 
     if (!file.is_open()) {
         ExitError("Cannot locate or open file.");
