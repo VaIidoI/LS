@@ -5,7 +5,7 @@ func printNumber(number, times):
 	for i = 0, i < times, i++:
 		printl: number;
 	end;
-end;
+	end;
 
 func main():
 	printNumber(10, 5);
