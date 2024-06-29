@@ -132,6 +132,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Archetypes.h" />
     <ClInclude Include="DataTypes.h" />
     <ClInclude Include="Parse.h" />
   </ItemGroup>

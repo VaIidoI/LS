@@ -21,31 +21,33 @@ using std::vector; using std::string; using std::to_string;
 //  5. Logical comparators like '==' and '>='
 using OpTypes = vector<int>;
 const enum OpType {
-    ARG = -1,          
-    SPACE = 0,    
+    ARG = 0,              
     COLON = 1,         
     COMMA = 2,         
     SET = 3,           
     MOD = 4,  
-    LOGIC = 5        
+    LOGIC = 5,
+    BRACK = 6
 };
-const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5} };
+const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5}, {"(", 6}, { ")", 6 } };
 
 
 std::string IntToOpType(const int& type) {
     switch (type) {
     case 0:
-        return "Whitespace";
+        return "Argument";
     case 1:
-        return "':'";
+        return ":";
     case 2:
-        return "','";
+        return ",";
     case 3:
-        return "'='";
+        return "=";
     case 4:
         return "Modification character";
     case 5:
         return "Logical comparator";
+    case 6:
+        return "Brackets";
     default:
         return "Unknown type";
     }
@@ -61,6 +63,22 @@ string TrimWhitespace(const string& line)
     if (start == string::npos) return "";
     size_t end = line.find_last_not_of(tags);
     return (start == end) ? line.substr(start, 1) : line.substr(start, end - start + 1);
+}
+
+vector<string> SplitString(const string& s, const char& delimiter) {
+    vector<string> ret(1, string());
+    for (const char& c : s) {
+        if (c == delimiter) {
+            ret.push_back(string()); continue;
+        }
+        ret.back() += c;
+    }
+
+    //Remove any lines that are whitespace
+    for (int i = 0; i < ret.size(); i++)
+        if (TrimWhitespace(ret[i]).empty())
+            ret.erase(ret.begin() + i);
+    return ret;
 }
 
 //Returns: Parsed line vector | Parse a line, making sure ; equals a new line, while checking if it isn't within quotes or in a comment. 
