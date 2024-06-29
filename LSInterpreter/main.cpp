@@ -1,8 +1,10 @@
+#include "Archetypes.h"
 #include "DataTypes.h"
 #include <iostream>
 #include <fstream>
 #include "Parse.h"
 #include <chrono>
+#include <stack>
 
 using std::cout; using std::endl; using std::to_string; using std::pair; using std::make_pair;
 
@@ -10,98 +12,6 @@ void ExitError(const string& error) noexcept {
     std::cerr << '\n' << error << "." << endl;
     exit(-1);
 }
-
-//A function consists of a name, arguments with specific types and an implementation
-class Func {
-public:
-    Func() : name_(""), types_(OpTypes{}), implementation_() {}
-
-    Func(const string& name, const OpTypes& types, const std::function<void(const vector<string>&)>& imp)
-        : name_(name), types_(types), implementation_(imp) {}
-
-    //Getters
-    string GetName() const {
-        return name_;
-    }
-
-    OpTypes GetTypes() const {
-        return types_;
-    }
-
-    std::function<void(const vector<string>&)> GetImplementation() const {
-        return implementation_;
-    }
-
-    //Function to execute the implementation
-    void Execute(const vector<string>& args) const {
-        implementation_(args);
-    }
-
-private:
-    int returnType_; std::string name_;    OpTypes types_;
-    std::function<void(const vector<string>&)> implementation_;
-};
-
-class Var {
-public:
-    Var() : data_(""), type_(0) {}
-    Var(const string& data, const int& type) : data_(data), type_(type) {}
-
-    string GetData() const {
-        return data_;
-    }
-
-    void SetData(const string& data) {
-        data_ = data;
-    }
-
-    int GetType() const {
-        return type_;
-    }
-
-private:
-    int type_; string data_;
-};
-
-class ControlFlow {
-public:
-    ControlFlow() = default;
-
-    ControlFlow(const int& line, const string& type, const string& endStatement) :
-        line_(line), type_(type), endStatement_(endStatement), jumpBegin_("") {}
-
-    ControlFlow(const int& line, const string& type, const string& jumpBegin, const string& jumpEnd, const string& endStatement) :
-        line_(line), type_(type), jumpBegin_(jumpBegin), jumpEnd_(jumpEnd), endStatement_(endStatement) {}
-
-    //Getters
-    int GetLine() const {
-        return line_;
-    }
-
-    string GetType() const {
-        return type_;
-    }
-
-    string GetEndStatement() {
-        return endStatement_;
-    }
-
-    string GetJumpBegin() const {
-        return jumpBegin_;
-    }
-
-    string GetJumpEnd() const {
-        return jumpEnd_;
-    }
-
-    //Setters
-    void SetEndStatement(const string& endStatement) {
-        endStatement_ = endStatement;
-    }
-
-private:
-    int line_; string type_, jumpBegin_, jumpEnd_, endStatement_;
-};
 
 int main(int argc, char* argv[]) {
     if (argc < 1) {
@@ -116,12 +26,16 @@ int main(int argc, char* argv[]) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    //Predefine a map storing all functions
-    std::unordered_map<string, vector<Func>> funcMap;
-    vector<Func> funcVec;
+    //Predefine a map storing all instructions
+    std::unordered_map<string, vector<Instruction>> instructions;
+
+    //Predefine a map storing all functions. Stores function name and argument count.
+    std::unordered_map<string, int> functions;
 
     //Predefine the maps which store the variables based on their names.
     std::unordered_map<string, Var> memory;
+    //Predefine a stack, storing variables
+    std::stack<Var> stack;
 
     //Create a list of keywords, which cannot be the names of variables.
     std::unordered_set<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
@@ -261,14 +175,100 @@ int main(int argc, char* argv[]) {
             else if (statementName == "func") {
                 string funcName = tokens[1];
 
-                if (tokens[2] != ":")
+                //Function should always have at least 5 tokens
+                if (tokens.size() < 5)
+                    ExitError("Invalid args in function definition on line " + to_string(lineNum));
+                
+                if (tokens.back() != ":")
                     ExitError("Expected ':' after function definition on line " + to_string(lineNum));
 
                 if(!statementVec.empty())
                     ExitError("Cannot define a function within another statement on line " + to_string(lineNum));
 
+                //Parse the function arguments
+                //3rd index should always be a open bracket
+                if(tokens[2] != "(")
+                    ExitError("Expected '(' in function definition on line " + to_string(lineNum));
+
+                //2nd to last index should always be a closing bracket
+                if (tokens[tokens.size() - 2] != ")")
+                    ExitError("Expected ')' in function definition on line " + to_string(lineNum));
+
+                vector<string> args; 
+
+                for (int i = 3; tokens[i] != ")"; i++) {
+                    string token = tokens[i]; 
+                    auto found = separators.find(token);
+                    //Token is an argument
+                    if (separators.find(token) == separators.cend()) {
+                        args.push_back(token);
+                    }
+                    //If it is a seperator, it should be a ','
+                    else {
+                        if (found->first != ",")
+                            ExitError("Expected ',' in function argument definition on line " + to_string(lineNum));
+                        continue;
+                    }
+                }
+
+                functions.insert({ funcName, args.size() });
+
+                //Function jump
                 parsedLines.push_back({ lineNum, "=" + funcName + ";" });
-                statementVec.push_back(ControlFlow(lineNum, "func", "return;"));
+                //End statement consisting of the deletes for every created variable
+                string endStatement = "";
+                //Variable predefinitions and pops;
+                for (const auto& arg : args) {
+                    parsedLines.push_back({ lineNum, "var " + arg + ";" });
+                    parsedLines.push_back({ lineNum, "pop: " + arg + ";" });
+                    endStatement += "delete:" + arg + ";";
+                }
+                statementVec.push_back(ControlFlow(lineNum, "func", endStatement + "return;"));
+            }
+            //A function call has been found
+            else if (functions.find(statementName) != functions.cend()) {
+                auto function = *functions.find(statementName);
+
+                if (tokens.size() < 4)
+                    ExitError("Invalid args provided when calling function on line " + to_string(lineNum));
+
+                if (tokens.back() != ";")
+                    ExitError("Expected ';' after calling function on line " + to_string(lineNum));
+
+                //2rd index should always be a open bracket
+                if (tokens[1] != "(")
+                    ExitError("Expected '(' when calling function on line " + to_string(lineNum));
+
+                //2nd to last index should always be a closing bracket
+                if (tokens[tokens.size() - 2] != ")")
+                    ExitError("Expected ')' when calling function on line " + to_string(lineNum));
+
+                vector<string> args;
+
+                for (int i = 2; tokens[i] != ")"; i++) {
+                    string token = tokens[i];
+                    auto found = separators.find(token);
+                    //Token is an argument
+                    if (separators.find(token) == separators.cend()) {
+                        args.push_back(token);
+                    }
+                    //If it is a seperator, it should be a ','
+                    else {
+                        if (found->first != ",")
+                            ExitError("Expected ',' when calling function on line " + to_string(lineNum));
+                        continue;
+                    }
+                }
+
+                //If function args do not match actual args
+                if(function.second != args.size())
+                    ExitError("No instance of " + statementName + " takes " + to_string(args.size()) + " arguments on line " + to_string(lineNum));
+
+                //Push each arg to the stack
+                for(int i = args.size() - 1; i >= 0; i--)
+                    parsedLines.push_back({ lineNum, "push: " + args[i] + ";"});
+                //Function calling
+                parsedLines.push_back({ lineNum, "call:" + statementName + ";" });
             }
             else if (statementName == "end") {
                 if(statementVec.size() == 0)
@@ -343,10 +343,10 @@ int main(int argc, char* argv[]) {
         if (type == ERROR) {
             string varName = value;
             if (!FindVar(varName, value, type))
-                throw std::exception(("Function received undefined identifier '" + value + "'").c_str());
+                throw std::exception(("Instruction received undefined identifier '" + value + "'").c_str());
             //If the type is STILL nothing, it is an uninitialized variable
             if(type == ERROR)
-                throw std::exception(("Function received uninitialized variable '" + value + "'").c_str());
+                throw std::exception(("Instruction received uninitialized variable '" + value + "'").c_str());
         }
     };
 
@@ -374,16 +374,16 @@ int main(int argc, char* argv[]) {
             throw std::exception(("Variable by the name of '" + varName + "' already defined").c_str());
     };
 
-    //Returns: Function implementation by name and opTypes
-    auto FindFunc = [&funcMap](const string& funcName, const OpTypes& types) {
-        //Find the function vector given the name
-        auto found = funcMap.find(funcName);
-        if(found == funcMap.cend())
-            throw std::exception(("Function expected, got: '" + funcName + "'").c_str());
+    //Returns: Instruction implementation by name and opTypes
+    auto FindInstruction = [&instructions](const string& funcName, const OpTypes& types) {
+        //Find the Instruction vector given the name
+        auto found = instructions.find(funcName);
+        if(found == instructions.cend())
+            throw std::exception(("Instruction expected, got: '" + funcName + "'").c_str());
         auto funcSet = (*found).second;
 
-        //Get the corresponding function implementation based on the types
-        auto func = std::find_if(funcSet.cbegin(), funcSet.cend(), [types](const Func& f) {
+        //Get the corresponding Instruction implementation based on the types
+        auto func = std::find_if(funcSet.cbegin(), funcSet.cend(), [types](const Instruction& f) {
             return f.GetTypes() == types;
         });
 
@@ -397,14 +397,13 @@ int main(int argc, char* argv[]) {
         }
 
         if (func == funcSet.cend())
-            throw std::exception(("No overload for function '" + funcName + "' matches types: " + error).c_str());
+            throw std::exception(("No overload for Instruction '" + funcName + "' matches types: " + error).c_str());
         
-
         return (*func).GetImplementation();
     };
 
-    funcMap.insert({ "print", vector<Func> {
-        Func("print", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+    instructions.insert({ "print", vector<Instruction> {
+        Instruction("print", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
             string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
 
             if (valueType == STRING)
@@ -414,8 +413,8 @@ int main(int argc, char* argv[]) {
         })
     } });
 
-    funcMap.insert({ "printl", vector<Func> {
-        Func("printl", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+    instructions.insert({ "printl", vector<Instruction> {
+        Instruction("printl", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
             string value = v[0]; int valueType = -1; ResolveValue(value, valueType);
 
             if (valueType == STRING)
@@ -425,21 +424,21 @@ int main(int argc, char* argv[]) {
         })
     } });
 
-    funcMap.insert({ "endl", vector<Func> {
-        Func("endl", OpTypes{}, [ResolveValue](vector<string> v) {
+    instructions.insert({ "endl", vector<Instruction> {
+        Instruction("endl", OpTypes{}, [ResolveValue](vector<string> v) {
             cout << endl;
         })
     } });
 
-    funcMap.insert({ "cls", vector<Func> {
-        Func("cls", OpTypes{}, [ResolveValue](vector<string> v) {
+    instructions.insert({ "cls", vector<Instruction> {
+        Instruction("cls", OpTypes{}, [ResolveValue](vector<string> v) {
             // Istg this is the best way to do this
             cout << "\033[2J\033[1;1H" << endl;
         })
     } });
 
-    funcMap.insert({ "input", vector<Func> {
-        Func("input", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+    instructions.insert({ "input", vector<Instruction> {
+        Instruction("input", OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0], value; int type = -1;
             // Reset errorLevel to 0 
             errorLevel = 0;
@@ -468,13 +467,46 @@ int main(int argc, char* argv[]) {
             }
         }),
         // Overload: Print a string before inputting. 
-        Func("input", OpTypes{ COLON, ARG, COMMA, ARG }, [&](vector<string> v) {
-            cout << FormatString(v[0]); FindFunc("input", OpTypes{ COLON, ARG })(vector<string>{v[1]});
+        Instruction("input", OpTypes{ COLON, ARG, COMMA, ARG }, [&](vector<string> v) {
+            cout << FormatString(v[0]); FindInstruction("input", OpTypes{ COLON, ARG })(vector<string>{v[1]});
         })
     }});
 
-    funcMap.insert({ "var", vector<Func> {
-        Func("var", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
+    instructions.insert({ "push", vector<Instruction> {
+        Instruction(OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string value = v[0]; int type = -1; ResolveValue(value, type);
+
+            //Push it to the stack
+            stack.push(Var(value, type));        
+        })
+    }});
+
+    instructions.insert({ "pop", vector<Instruction> {
+        Instruction(OpTypes{ COLON, ARG }, [&](vector<string> v) {
+            string name = v[0], value; int type = -1; 
+
+            if (!FindVar(name, value, type))
+                throw std::exception(("Pop received undefined identifier '" + name + "'").c_str());
+
+            if(stack.empty())
+                throw std::exception("Tried popping while stack is empty");
+
+            Var top = stack.top(); stack.pop();
+            // Uninitialized variable as target, proceed accordingly
+            if (type == ERROR) {
+                memory[name] = top;
+                return;
+            }
+
+            if(type != top.GetType())
+                throw std::exception(("Pop received wrong type Got: '" + IntToType(type) + "' Expected: '" + IntToType(top.GetType())).c_str());
+            //Pop it to the variable
+            memory[name].SetData(top.GetData());
+        })
+    }});
+
+    instructions.insert({ "var", vector<Instruction> {
+        Instruction("var", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
             string name = v[0]; string value = v[1]; int valueType = 0;
             ResolveValue(value, valueType);
 
@@ -485,7 +517,7 @@ int main(int argc, char* argv[]) {
             memory[name] = Var(value, valueType);
         }),
         // Overload: Define variable, but do not initialize it
-        Func("var", OpTypes{ ARG }, [&](vector<string> v) {
+        Instruction("var", OpTypes{ ARG }, [&](vector<string> v) {
             string name = v[0];
             ValidateVarName(name);
 
@@ -493,10 +525,10 @@ int main(int argc, char* argv[]) {
         })
     }});
 
-    funcMap.insert({ "[VarName]", vector<Func> {
+    instructions.insert({ "[VarName]", vector<Instruction> {
         // Sets a variable to a value
         // the final line should look like [VarName] var1 = value, thus having an additional 0 prepended.
-        Func("[VarName]", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
+        Instruction("[VarName]", OpTypes{ ARG, SET, ARG }, [&](vector<string> v) {
             string name = v[0]; string nameValue = ""; int nameType = 0;
             string value = v[1]; int valueType = 0; ResolveValue(value, valueType);
 
@@ -516,7 +548,7 @@ int main(int argc, char* argv[]) {
             memory[name] = Var(value, valueType);
         }),
         // Modifying a variable
-        Func("[VarName]", OpTypes{ ARG, MOD, ARG }, [&](vector<string> v) {
+        Instruction("[VarName]", OpTypes{ ARG, MOD, ARG }, [&](vector<string> v) {
             string name = v[0]; string nameValue = ""; int nameType = 0;
             string value = v[2]; int valueType = 0; ResolveValue(value, valueType);
             string op = v[1];
@@ -567,7 +599,7 @@ int main(int argc, char* argv[]) {
                 memory[name].SetData(to_string((int)stod(memory.at(name).GetData())));
         }),
         // Incrementing or decrementing variable
-        Func("[VarName]", OpTypes{ ARG, MOD }, [&](vector<string> v) {
+        Instruction("[VarName]", OpTypes{ ARG, MOD }, [&](vector<string> v) {
             string name = v[0], value = ""; int type = 0;
             string op = v[1];
 
@@ -595,9 +627,9 @@ int main(int argc, char* argv[]) {
 
     }});
 
-    funcMap.insert({ "sqrt", vector<Func> {
+    instructions.insert({ "sqrt", vector<Instruction> {
         // Modifying a variable
-        Func("sqrt", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+        Instruction("sqrt", OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0]; string nameValue = ""; int nameType = 0;
 
             // if the name doesn't get found
@@ -619,8 +651,8 @@ int main(int argc, char* argv[]) {
         })
     }});
 
-    funcMap.insert({ "delete", vector<Func> {
-        Func("delete", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+    instructions.insert({ "delete", vector<Instruction> {
+        Instruction("delete", OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0], value; int type = -1;
             errorLevel = 0;
 
@@ -632,18 +664,21 @@ int main(int argc, char* argv[]) {
         })
     }});
 
-    funcMap.insert({ "exit", vector<Func> {
-        Func("exit", OpTypes{ COLON, ARG }, [ResolveValue](vector<string> v) {
+    instructions.insert({ "exit", vector<Instruction> {
+        Instruction("exit", OpTypes{ COLON, ARG }, [ResolveValue, start](vector<string> v) {
             string code = v[0]; int type = 0; ResolveValue(code, type);
 
             if (GetDataType(code) != INT) throw std::exception(("Exit requires argument type: 'int' got: '" + IntToType(type) + "'").c_str());
-            cout << endl << "Program exited with code: " << code << endl;
+
+            auto end = std::chrono::high_resolution_clock::now();
+            cout << endl << "Program sucessfully executed. Exited with code 0." << endl <<
+                "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
             exit(stoi(code));
         })
     }});
 
-    funcMap.insert({ "jump", vector<Func> {
-        Func("jump", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+    instructions.insert({ "jump", vector<Instruction> {
+        Instruction("jump", OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0]; int nameType = GetDataType(name);
 
             // As labels can only be ErrorTypes, check for that
@@ -660,8 +695,8 @@ int main(int argc, char* argv[]) {
         })
     }});
 
-    funcMap.insert({ "call", vector<Func> {
-        Func("call", OpTypes{ COLON, ARG }, [&](vector<string> v) {
+    instructions.insert({ "call", vector<Instruction> {
+        Instruction("call", OpTypes{ COLON, ARG }, [&](vector<string> v) {
             string name = v[0]; int nameType = GetDataType(name);
 
             // As labels can only be ErrorTypes, check for that
@@ -679,19 +714,19 @@ int main(int argc, char* argv[]) {
         })
 } });
 
-    funcMap.insert({ "return", vector<Func> {
-        Func("return", OpTypes{}, [&](vector<string> v) {
+    instructions.insert({ "return", vector<Instruction> {
+        Instruction("return", OpTypes{}, [&](vector<string> v) {
             // Return is equivalent to exit if the callHistory is empty.
             if (callHistory.size() < 1)
-                FindFunc("exit", OpTypes{ COLON, ARG })(vector<string> { "0" });
+                FindInstruction("exit", OpTypes{ COLON, ARG })(vector<string> { "0" });
 
             // Set current line to latest entry and remove the entry. 
             parsedLineIndex = callHistory.back(); callHistory.pop_back();
         })
     }});
 
-    funcMap.insert({ "if", vector<Func> {
-        Func("if", OpTypes{ ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
+    instructions.insert({ "if", vector<Instruction> {
+        Instruction("if", OpTypes{ ARG, LOGIC, ARG, COMMA, ARG }, [&](vector<string> v) {
             string value1 = v[0]; int value1Type = 0;
             string op = v[1];
             string value2 = v[2]; int value2Type = 0;
@@ -705,7 +740,7 @@ int main(int argc, char* argv[]) {
 
             // check for validity.
             if ((op == "==" && value1 != value2) || (op == "!=" && value1 == value2)) {
-                FindFunc("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] }); return;
+                FindInstruction("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] }); return;
             }
             // If operators are indeed that, but not true then return
             else if ((op == "==" || op == "!="))
@@ -720,26 +755,26 @@ int main(int argc, char* argv[]) {
 
             // If the conditions aren't met, jump to the end_if
             if ((op == "<" && value1d >= value2d) || (op == ">" && value1d <= value2d) || (op == ">=" && value1d < value2d) || (op == "<=" && value1d > value2d)) {
-                FindFunc("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] });
+                FindInstruction("jump", OpTypes{ COLON, ARG })(vector<string> { v[3] });
             }
         })
     }});
 
     //Append function names to the blacklist
-    for (const auto& a : funcVec)
-        blacklist.insert(a.GetName());
+    for (const auto& a : instructions)
+        blacklist.insert(a.first);
 
     //Vector storing functions on each line. Int stores real line, vector<string> stores arg, function stores implementation
-    vector<std::tuple<int, vector<string>, std::function<void(const vector<string>&)>>> functions;
+    vector<std::tuple<int, vector<string>, std::function<void(const vector<string>&)>>> instructionVec;
 
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for(const auto& [lineNum, l] : parsedLines) {
         vector<string> tokens;
-
+        // cout << l << endl;
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
-            functions.push_back({ -1, vector<string>{}, nullptr });
+            instructionVec.push_back({ -1, vector<string>{}, nullptr });
             continue;
         }
 
@@ -757,7 +792,7 @@ int main(int argc, char* argv[]) {
 
         string funcName = tokens[0];
         //If funcName is not a function, perhaps it is an identifier. Prepend [VarName] and set it as the function name. 
-        if (funcMap.find(funcName) == funcMap.cend()) {
+        if (instructions.find(funcName) == instructions.cend()) {
             tokens.insert(tokens.begin(), "[VarName]"); funcName = "[VarName]";
         }
 
@@ -782,28 +817,29 @@ int main(int argc, char* argv[]) {
 
         //Store the function in the function vector
         try {
-            functions.push_back({ lineNum, args, FindFunc(funcName, argTypes) });
+            instructionVec.push_back({ lineNum, args, FindInstruction(funcName, argTypes) });
         }
         catch (const std::exception& e) {
             //Specialized error message for [VarName] as it indicates a non-function funcName
             if (funcName == "[VarName]")
-                ExitError("No function or identifier by the name '" + tokens[1] + "' found on line " + to_string(lineNum));
+                ExitError("No Instruction or identifier by the name '" + tokens[1] + "' found on line " + to_string(lineNum));
             ExitError(string(e.what()) + " on line " + to_string(lineNum));
         }
     }
 
     //Execute the functions
-    for (; parsedLineIndex < functions.size(); parsedLineIndex++) {
+    for (; parsedLineIndex < instructionVec.size(); parsedLineIndex++) {
         //If parsedLineIndex is on the latest call, delete it to avoid duplicate calls. 
         if (!callHistory.empty() && callHistory.back() == parsedLineIndex)
             callHistory.erase(callHistory.begin() + parsedLineIndex);
 
-        int lineNum = std::get<0>(functions[parsedLineIndex]);
+        int lineNum = std::get<0>(instructionVec[parsedLineIndex]);
+        auto args = std::get<1>(instructionVec[parsedLineIndex]);
+        auto func = std::get<2>(instructionVec[parsedLineIndex]);
+
         //Label
         if (lineNum == -1)
             continue;
-        auto args = std::get<1>(functions[parsedLineIndex]);
-        auto func = std::get<2>(functions[parsedLineIndex]);
 
         try {
             //Get the function implementation and pass in the args. Index 2 and 1 respectively
@@ -814,10 +850,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
-
-    cout << endl << "Program sucessfully executed. Exited with code 0." <<  endl <<
-        "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
+    //Use the actual exit instruction to exit. Effectively saving 3 lines of code lol
+    FindInstruction("exit", OpTypes{ COLON, ARG })(vector<string> { "0" });
    
     file.close();
     return 0;

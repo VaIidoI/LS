@@ -26,9 +26,10 @@ const enum OpType {
     COMMA = 2,         
     SET = 3,           
     MOD = 4,  
-    LOGIC = 5        
+    LOGIC = 5,
+    BRACK = 6
 };
-const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5} };
+const std::unordered_map<std::string, int> separators = { {":", 1}, {",", 2}, {"=", 3}, {"++", 4}, {"--", 4}, {"+=", 4}, {"-=", 4}, {"*=", 4}, {"/=", 4}, { "%=", 4 }, {"==", 5}, {"!=", 5}, {"<", 5}, {">", 5}, {"<=", 5}, {">=", 5}, {"(", 6}, { ")", 6 } };
 
 
 std::string IntToOpType(const int& type) {
@@ -45,6 +46,8 @@ std::string IntToOpType(const int& type) {
         return "Modification character";
     case 5:
         return "Logical comparator";
+    case 6:
+        return "Brackets";
     default:
         return "Unknown type";
     }
