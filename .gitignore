@@ -656,6 +656,7 @@ StyleCopReport.xml
 *.svclog
 *.scc
 *.vcxproj
+*.sln
 
 # Chutzpah Test files
 _Chutzpah*
