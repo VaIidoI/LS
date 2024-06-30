@@ -1,5 +1,5 @@
 # Entry point
-call: main; return;
+call: main; exit: 0;
 
 func factorial(number):
     var result = 1;
@@ -8,7 +8,7 @@ func factorial(number):
         result *= i;
     end;
 
-    push: result; delete: result;
+    return: result;
 end;
 
 func main():
@@ -19,10 +19,10 @@ func main():
 	var factN; var factK; var factNK;
 	
     # Call the factorial function for n, k, and (n-k)
-    factorial(n); pop: factN;
-    factorial(k); pop: factK;
+    factorial(n) >> factN;
+    factorial(k) >> factK;
     var nk = n; nk -= k;
-    factorial(nk); pop: factNK;
+    factorial(nk) >> factNK;
 
     # Calculate the binomial coefficient
     var denominator = factK; denominator *= factNK;

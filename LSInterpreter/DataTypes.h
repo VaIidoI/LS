@@ -32,37 +32,43 @@ int StringToType(const string& s) {
     return -1; // Indicating an unknown type
 }
 
-int GetDataType(const string& line) {
+int GetDataType(const std::string& line) {
     if (line.empty())
         return ERROR;
-    //Check for bool
+
+    // Check for bool
     if (line == "true" || line == "false")
         return BOOL;
 
-    //Check for string
-    if (line[0] == '"' && line.back() == '"')
+    // Check for string
+    if (line.front() == '"' && line.back() == '"')
         return STRING;
 
-    int minusCount = 0; int dotCount = 0;
-    for (int i = 0; i <= line.size(); i++) {
-        //Check for int, if index is on last character, it means all characters are numbers, no dots.
-        if (i == line.size() && dotCount == 0) {
-            //Make sure that there's only 1 or less minus
-            if (minusCount > 1) break;
-            return INT;
+    int minusCount = 0;
+    int dotCount = 0;
+
+    for (const char& c : line) {
+        if (c == '-') {
+            ++minusCount;
         }
-        //Check for double, if index is on last character, it means all characters are numbers. Exactly 1 dot and 1 minus
-        if (i == line.size() && dotCount == 1) {
-            //Make sure that there's only 1 or less minus
-            if (minusCount > 1) break;
-            return DOUBLE;
+        else if (c == '.') {
+            ++dotCount;
         }
-        if (line[i] == '-') { ++minusCount; continue; }
-        if (line[i] == '.') { ++dotCount; continue; }
-        if (!isdigit(line[i]))  break;
+        else if (!isdigit(c)) {
+            return ERROR;
+        }
     }
+
+    // Check for int
+    if (dotCount == 0 && minusCount <= 1)
+        return INT;
+
+    // Check for double
+    if (dotCount == 1 && minusCount <= 1)
+        return DOUBLE;
 
     return ERROR;
 }
+
 
 #endif // !DATA_TYPES

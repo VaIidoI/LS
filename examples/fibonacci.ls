@@ -1,5 +1,5 @@
 # Entry point
-call: main; return;
+call: main; exit: 0;
 
 func main():
     # Define the number of terms for the Fibonacci sequence

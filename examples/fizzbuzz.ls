@@ -1,4 +1,4 @@
-call: main; return;
+call: main; exit 0;
 
 func FizzBuzz(number):
 	var bFizzOrBuzz = false;

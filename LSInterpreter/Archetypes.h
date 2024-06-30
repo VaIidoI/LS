@@ -59,6 +59,10 @@ public:
         return type_;
     }
 
+    void SetType(const int& type) {
+        type_ = type;
+    }
+
 private:
     int type_; string data_;
 };
@@ -101,6 +105,29 @@ public:
 
 private:
     int line_; string type_, jumpBegin_, jumpEnd_, endStatement_;
+};
+
+class Function {
+public:
+    Function() : name_(""), args_() {}
+    Function(const string& name, const vector<string>& args) : name_(name), args_(args) {}
+
+    //Getters
+    string GetName() const {
+        return name_;
+    }
+
+    vector<string> GetArgs() const {
+        return args_;
+    }
+
+    //Setters
+    void AddArg(const string& arg) {
+        args_.push_back(arg);
+    }
+
+private:
+    string name_; vector<string> args_;
 };
 #endif // !ARCHETYPES_H
 

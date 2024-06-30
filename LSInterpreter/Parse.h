@@ -171,7 +171,7 @@ vector<string> Tokenize(const string& line) {
 
     //In case a string was started but never ended with a quote.
     if (isString)
-        throw std::exception("Missing closing quote");
+        throw std::runtime_error("Missing closing quote");
 
     if (ret.back() == string())
         ret.pop_back();
@@ -179,13 +179,20 @@ vector<string> Tokenize(const string& line) {
     return ret;
 }
 
-//Removes the quotes from a string
-string FormatString(string& s) {
-    //First and last chars should be '"'.
-    s = s.substr(1, s.size() - 2);
-    return s;
+// Removes the quotes from a string
+void FormatString(string& s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
+        s = s.substr(1, s.size() - 2);
+    }
 }
 
+// Removes the quotes from a string (returns a new string)
+string FormatString(std::string_view s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
+        return string(s.substr(1, s.size() - 2));
+    }
+    return string(s); // Return as is if not properly quoted
+}
 //Removes a labels formatting
 string FormatLabel(const string& label) {
     //First char should be '=', last char should be ';'. 
