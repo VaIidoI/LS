@@ -8,40 +8,6 @@
 
 using std::vector; using std::string;
 
-//A function consists of a name, arguments with specific types and an implementation
-class Instruction {
-public:
-    Instruction() : name_(""), types_(vector<int>{}), implementation_() {}
-
-    Instruction(const string& name, const vector<int>& types, const std::function<void(const vector<string>&)>& imp)
-        : name_(name), types_(types), implementation_(imp) {}
-
-    Instruction(const vector<int>& types, const std::function<void(const vector<string>&)>& imp)
-        : name_(""), types_(types), implementation_(imp) {}
-
-    //Getters
-    string GetName() const {
-        return name_;
-    }
-
-    vector<int> GetTypes() const {
-        return types_;
-    }
-
-    std::function<void(const vector<string>&)> GetImplementation() const {
-        return implementation_;
-    }
-
-    //Function to execute the implementation
-    void Execute(const vector<string>& args) const {
-        implementation_(args);
-    }
-
-private:
-    std::string name_; vector<int> types_;
-    std::function<void(const vector<string>&)> implementation_;
-};
-
 class Var {
 public:
     Var() : data_(""), type_(0) {}
@@ -67,14 +33,99 @@ private:
     int type_; string data_;
 };
 
-class ControlFlow {
+//An instruction consists of arguments with specific types and an implementation
+class Instruction {
 public:
-    ControlFlow() = default;
+    Instruction() : types_(vector<int>{}), implementation_() {}
 
-    ControlFlow(const int& line, const string& type, const string& endStatement) :
+    Instruction(const vector<int>& types, const std::function<void(const vector<string>&)>& imp)
+        : types_(types), implementation_(imp) {}
+
+    //Getters
+
+    vector<int> GetTypes() const {
+        return types_;
+    }
+
+    std::function<void(const vector<string>&)> GetImplementation() const {
+        return implementation_;
+    }
+
+    //Function to execute the implementation
+    void Execute(const vector<string>& args) const {
+        implementation_(args);
+    }
+
+private:
+    vector<int> types_;
+    std::function<void(const vector<string>&)> implementation_;
+};
+
+class InstructionHandle {
+public:
+    InstructionHandle() = default;
+
+    InstructionHandle(int line, const std::vector<std::string>& args, Instruction* instruction)
+        : line_(line), args_(args), instruction_(instruction) {}
+
+    // Getters
+    int GetLine() const {
+        return line_;
+    }
+
+    const std::vector<std::string>& GetArgs() const {
+        return args_;
+    }
+
+    Instruction* GetInstruction() const {
+        return instruction_;
+    }
+
+    // Setters
+    void SetLine(int line) {
+        line_ = line;
+    }
+
+    void SetArgs(const std::vector<std::string>& args) {
+        args_ = args;
+    }
+
+private:
+    int line_;
+    std::vector<std::string> args_;
+    Instruction* instruction_;
+};
+
+class ControlStructure {
+public:
+    ControlStructure() : types_(vector<int>{}), implementation_() {}
+
+    ControlStructure(const vector<int>& types, const std::function<void(const vector<string>&, const int&)>& imp)
+        : types_(types), implementation_(imp) {}
+
+    //Getters
+    vector<int> GetTypes() const {
+        return types_;
+    }
+
+    //Function to execute the implementation
+    void Execute(const vector<string>& args, const int& lineNum) const {
+        implementation_(args, lineNum);
+    }
+
+private:
+    vector<int> types_;
+    std::function<void(const vector<string>&, const int&)> implementation_;
+};
+
+class ControlStructureData {
+public:
+    ControlStructureData() = default;
+
+    ControlStructureData(const int& line, const int & type, const string& endStatement) :
         line_(line), type_(type), endStatement_(endStatement), jumpBegin_("") {}
 
-    ControlFlow(const int& line, const string& type, const string& jumpBegin, const string& jumpEnd, const string& endStatement) :
+    ControlStructureData(const int& line, const int& type, const string& jumpBegin, const string& jumpEnd, const string& endStatement) :
         line_(line), type_(type), jumpBegin_(jumpBegin), jumpEnd_(jumpEnd), endStatement_(endStatement) {}
 
     //Getters
@@ -82,7 +133,7 @@ public:
         return line_;
     }
 
-    string GetType() const {
+    int GetType() const {
         return type_;
     }
 
@@ -104,7 +155,7 @@ public:
     }
 
 private:
-    int line_; string type_, jumpBegin_, jumpEnd_, endStatement_;
+    int line_; int type_; string jumpBegin_, jumpEnd_, endStatement_;
 };
 
 class Function {

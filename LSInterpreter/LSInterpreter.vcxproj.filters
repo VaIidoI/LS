@@ -23,10 +23,10 @@
     <ClInclude Include="Parse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DataTypes.h">
+    <ClInclude Include="Archetypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Archetypes.h">
+    <ClInclude Include="Grammar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
