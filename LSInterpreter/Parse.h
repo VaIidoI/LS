@@ -134,7 +134,7 @@ void FormatString(string& s) {
 }
 
 // Removes the quotes from a string (returns a new string)
-string FormatString(std::string_view s) {
+string FormatStringA(const string& s) {
     if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
         return string(s.substr(1, s.size() - 2));
     }

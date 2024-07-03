@@ -1,6 +1,4 @@
-var i = 0;
-=start; 
-	if(i < 1000000):
-		i++;
-	jump: start;
-end;
+var i = 6;
+i = 3; var j = "a";
+i += j;
+printl: i;

@@ -5,40 +5,58 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <variant>
+#include "Grammar.h"
 
 using std::vector; using std::string;
 
+using Data = std::variant<bool, int, double, string>;
+
 class Var {
 public:
-    Var() : data_(""), type_(0) {}
-    Var(const string& data, const int& type) : data_(data), type_(type) {}
+    Var() : data_(0), type_(ERROR) {}
+    Var(const string& data) : data_(data), type_(STRING) {}
+    Var(const double& data) : data_(data), type_(DOUBLE) {}
+    Var(const int& data) : data_(data), type_(INT) {}
+    Var(const bool& data) : data_(data), type_(BOOL) {}
 
-    string GetData() const {
+    Data GetData() const {
         return data_;
     }
 
     void SetData(const string& data) {
-        data_ = data;
+        data_ = data; type_ = STRING;
+    }
+
+    void SetData(const double& data) {
+        data_ = data; type_ = DOUBLE;
+    }
+
+    void SetData(const int& data) {
+        data_ = data; type_ = INT;
+    }
+
+    void SetData(const bool& data) {
+        data_ = data; type_ = BOOL;
     }
 
     int GetType() const {
         return type_;
     }
 
-    void SetType(const int& type) {
-        type_ = type;
-    }
-
 private:
-    int type_; string data_;
+    int type_; Data data_;
 };
+
+using Arguments = vector<string>;
+using Implementation = std::function<void(const Arguments&)>;
 
 //An instruction consists of arguments with specific types and an implementation
 class Instruction {
 public:
     Instruction() : types_(vector<int>{}), implementation_() {}
 
-    Instruction(const vector<int>& types, const std::function<void(const vector<string>&)>& imp)
+    Instruction(const vector<int>& types, const Implementation& imp)
         : types_(types), implementation_(imp) {}
 
     //Getters
@@ -47,38 +65,38 @@ public:
         return types_;
     }
 
-    std::function<void(const vector<string>&)> GetImplementation() const {
+    Implementation GetImplementation() const {
         return implementation_;
     }
 
     //Function to execute the implementation
-    void Execute(const vector<string>& args) const {
+    void Execute(const Arguments& args) const {
         implementation_(args);
     }
 
 private:
     vector<int> types_;
-    std::function<void(const vector<string>&)> implementation_;
+    Implementation implementation_;
 };
 
 class InstructionHandle {
 public:
     InstructionHandle() = default;
 
-    InstructionHandle(int line, const std::vector<std::string>& args, Instruction* instruction)
-        : line_(line), args_(args), instruction_(instruction) {}
+    InstructionHandle(int line, const Arguments& args, Implementation implementation)
+        : line_(line), args_(args), implementation_(implementation) {}
 
     // Getters
     int GetLine() const {
         return line_;
     }
 
-    const std::vector<std::string>& GetArgs() const {
+    Arguments GetArgs() const {
         return args_;
     }
 
-    Instruction* GetInstruction() const {
-        return instruction_;
+    Implementation GetImplementation() const {
+        return implementation_;
     }
 
     // Setters
@@ -86,14 +104,14 @@ public:
         line_ = line;
     }
 
-    void SetArgs(const std::vector<std::string>& args) {
+    void SetArgs(const Arguments& args) {
         args_ = args;
     }
 
 private:
     int line_;
-    std::vector<std::string> args_;
-    Instruction* instruction_;
+    Arguments args_;
+    Implementation implementation_;
 };
 
 class ControlStructure {
