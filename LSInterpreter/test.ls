@@ -1,31 +1,21 @@
 var max = 100000; var primeCount = 0; var root = 0; var isPrime = false; var modulo = 0;
 call: main; exit: 0;
 
-func Root(num):
-	sqrt: num;
-	return: num;
-end;
-
-func Modulo(num, div):
-	num %= div;
-	delete: div; return: num;
-end;
-
-func main(): 
-	for (n = 2, n < max, n++):
-		Root(n) >> root; isPrime = true;
-		for (i = 2, i <= root, i++):
-			Modulo(n, i) >> modulo;
+func main() { 
+	for (n = 2, n < max, n++) {
+		root = n; sqrt: root; isPrime = true;
+		for (i = 2, i <= root, i++) {
+			modulo = n; modulo %= i;
 			
-			if (modulo == 0):
+			if (modulo == 0) {
 				isPrime = false; break;
-			end;
-		end;
+			}
+		}
 		
-		if (isPrime == true):
+		if (isPrime) {
 			primeCount++;
-		end;
-	end;
+		}
+	}
 	print: "In the first "; print: max; print: " numbers, there are "; print: primeCount; print: " prime numbers";
-end;
+}
 

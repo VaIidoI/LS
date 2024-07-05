@@ -12,22 +12,6 @@ enum DataTypes {
     BOOL = 4000
 };
 
-const enum TokenType {
-    ARG = 0,
-    COLON = 1,
-    SEMICOLON = 2,
-    COMMA = 3,
-    NEG = 4,
-    SET = 5,
-    MOD = 6,
-    LOGIC = 7,
-    O_PAREN = 8,
-    C_PAREN = 9,
-    LSHIFT = 10,
-    RSHIFT = 11
-};
-
-
 const enum ControlStatements {
     IF = 0,
     ELSE,
@@ -40,30 +24,51 @@ const enum ControlStatements {
     END
 };
 
+const enum TokenType {
+    ARG = 0,
+    COLON = 100,
+    SEMICOLON = 200,
+    COMMA = 300,
+    NEG = 400,
+    O_PAREN = 500,
+    C_PAREN = 600,
+    O_CURLY = 700,
+    C_CURLY = 800,
+    LSHIFT = 900,
+    RSHIFT = 1000,
+    SET = 1100,
+    MOD = 1200,
+    LOGIC = 1300
+};
+
 // Brief explanation of token types
-// -1. Actual argument
-//  0. Whitespace
-//  1. ':' character
-//  2. ';' character
-//  3. ',' character
-//  4. Negation character '!' 
-//  5. Set character '='
-//  6. Modification characters like '++', '--', '+=', etc.
-//  7. Logical comparators like '==' and '>='
-//  8. Open parenthesis '('
-//  9. Close parenthesis ')'
-// 10. Left shift '<<'
-// 11. Right shift '>>'
+//  0.  Actual argument (ARG)
+// 100. ':' character (COLON)
+// 200. ';' character (SEMICOLON)
+// 300. ',' character (COMMA)
+// 400. Negation character '!' (NEG)
+// 500. Open parenthesis '(' (O_PAREN)
+// 600. Close parenthesis ')' (C_PAREN)
+// 700. Open curly bracket '{' (O_CURLY)
+// 800. Close curly bracket '}' (C_CURLY)
+// 900. Left shift '<<' (LSHIFT)
+// 1000. Right shift '>>' (RSHIFT)
+// 1100. Set character '=' (SET)
+// 1200. Modification characters like '++', '--', '+=', etc. (MOD)
+// 1300. Logical comparators like '==' and '>=' (LOGIC)
 using TokenTypes = std::vector<int>;
 
 const std::unordered_map<std::string, int> separators = {
-    {":", 1}, {";", 2}, {",", 3}, {"!", 4}, {"=", 5}, {"++", 6}, {"--", 6}, {"+=", 6},
-    {"-=", 6}, {"*=", 6}, {"%=", 6}, {"==", 7}, {"!=", 7}, {"<", 7},
-    {">", 7}, {"<=", 7}, {">=", 7}, {"(", 8}, {")", 9}, {">>", 11}, {"<<", 10}
+    {":", COLON}, {";", SEMICOLON}, {",", COMMA}, {"!", NEG},
+    {"=", SET}, {"++", MOD}, {"--", MOD}, {"+=", MOD},
+    {"-=", MOD}, {"*=", MOD}, {"/=", MOD}, {"%=", MOD},
+    {"==", LOGIC}, {"!=", LOGIC}, {"<", LOGIC}, {">", LOGIC},
+    {"<=", LOGIC}, {">=", LOGIC}, {"(", O_PAREN}, {")", C_PAREN},
+    {"{", O_CURLY}, {"}", C_CURLY}, {">>", RSHIFT}, {"<<", LSHIFT}
 };
 
-// Helper functions for conversions and such
 
+// Helper functions for conversions and such
 std::string IntToType(const int& type) {
     switch (type) {
         case 0:
@@ -131,27 +136,28 @@ std::string IntToTokenType(const int& type) {
         return ",";
     case NEG:
         return "!";
+    case O_PAREN:
+        return "Open parenthesis";
+    case C_PAREN:
+        return "Close parenthesis";
+    case O_CURLY:
+        return "Open curly bracket";
+    case C_CURLY:
+        return "Close curly bracket";
+    case LSHIFT:
+        return "Left shift";
+    case RSHIFT:
+        return "Right shift";
     case SET:
         return "=";
     case MOD:
         return "Modification character";
     case LOGIC:
         return "Logical comparator";
-    case O_PAREN:
-        return "Open parenthesis";
-    case C_PAREN:
-        return "Close parenthesis";
-    case LSHIFT:
-        return "Left shift";
-    case RSHIFT:
-        return "Right shift";
     default:
         return "Unknown type";
     }
 }
-
-
-
 
 #endif // !GRAMMAR_H
 

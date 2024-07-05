@@ -83,7 +83,7 @@ class InstructionHandle {
 public:
     InstructionHandle() = default;
 
-    InstructionHandle(int line, const Arguments& args, Implementation implementation)
+    InstructionHandle(int line, const Arguments& args, const Implementation& implementation)
         : line_(line), args_(args), implementation_(implementation) {}
 
     // Getters
@@ -91,12 +91,8 @@ public:
         return line_;
     }
 
-    Arguments GetArgs() const {
-        return args_;
-    }
-
-    Implementation GetImplementation() const {
-        return implementation_;
+    void Execute() {
+        implementation_(args_);
     }
 
     // Setters

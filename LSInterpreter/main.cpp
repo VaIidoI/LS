@@ -4,12 +4,39 @@
 #include "Parse.h"
 #include <chrono>
 #include <stack>
+#include <thread>
+#include <random>
 
-using std::cout; using std::endl; using std::to_string; using std::pair; using std::make_pair; using std::runtime_error;
+using std::cout; using std::endl; using std::to_string; using namespace std::chrono;
+using std::pair; using std::make_pair; using std::runtime_error;
 
 void ExitError(const string& error) noexcept {
     std::cerr << '\n' << error << "." << endl;
     exit(-1);
+}
+
+void ExitError(const string& error, const int& lineNum) noexcept {
+    std::cerr << '\n' << error << " on line " << to_string(lineNum) << "." << endl;
+    exit(-1);
+}
+
+double GenerateRandomDouble() {
+    //Random engine. 
+    static std::mt19937 rng(static_cast<unsigned int>(steady_clock::now().time_since_epoch().count()));
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(rng);
+}
+
+double fast_stod(const string& str) {
+    double value;
+    std::from_chars(str.data(), str.data() + str.size(), value);
+    return value;
+}
+
+int fast_stoi(const string& str) {
+    int value;
+    std::from_chars(str.data(), str.data() + str.size(), value);
+    return value;
 }
 
 int main(int argc, char* argv[]) {
@@ -22,8 +49,8 @@ int main(int argc, char* argv[]) {
     if (!file.is_open()) {
         ExitError("Cannot locate or open file.");
     }
-
-    auto start = std::chrono::high_resolution_clock::now();
+    //Start measuring time
+    auto start = high_resolution_clock::now();
 
     //Predefine a map storing all instructions by name
     std::unordered_map<string, vector<Instruction>> instructions;
@@ -34,16 +61,16 @@ int main(int argc, char* argv[]) {
     std::unordered_map<string, int> functions;
 
     //Predefine the maps which store the variables based on their names.
-    std::unordered_map<string, Var> memory;
+    std::unordered_map<string, Var> memory; memory.reserve(128);
     //Predefine a stack, storing variables
-    std::deque<Var> stack;
+    vector<Var> stack; stack.reserve(128);
 
     //Create a list of keywords, which cannot be the names of variables or labels
     std::unordered_set<string> blacklist = { "string", "double", "int", "bool", "errorLevel" };
 
     //Create a map storing the label's location by name along with a vector storing the line "history"
     //Also create a lineIndex to keep track of the current line.
-    std::unordered_map<string, int> labelMap; vector<int> callHistory;
+    std::unordered_map<string, int> labelMap; vector<int> callHistory; callHistory.reserve(128);
 
     //Create a vector storing all the parsed lines, along with the actual line number 
     vector<pair<int, string>> parsedLines; int parsedLineIndex = 0;
@@ -56,35 +83,35 @@ int main(int argc, char* argv[]) {
 
     // Implement all the statement functions here
     statements["for"] = vector<ControlStructure>{
-        ControlStructure(TokenTypes{ O_PAREN, ARG, SET, ARG, COMMA, ARG, LOGIC, ARG, COMMA, ARG, MOD, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        ControlStructure(TokenTypes{ O_PAREN, ARG, SET, ARG, COMMA, ARG, LOGIC, ARG, COMMA, ARG, MOD, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //For each for-loop segment, parse it
-            string initializer = v[1] + "=" + v[2], condition = v[3] + v[4] + v[5], iteration = v[6] + v[7] + v[8];
+            const string initializer = v[0] + "=" + v[1], condition = v[2] + v[3] + v[4], iteration = v[5] + v[6] + v[7];
 
             //Insert all of the necessary lines 
-            string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";delete: " + v[1] + ";";
+            string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";delete: " + v[0] + ";";
             string jumpBegin = "FOR_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
             parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
             parsedLines.push_back({ lineNum,   "=" + jumpBegin + ";"});
             parsedLines.push_back({ lineNum,  "if: " + condition + "," + jumpEnd + ";" });
             statementVec.push_back(ControlStructureData(lineNum, FOR, jumpBegin, jumpEnd, endStatement));
         }),
-            //Override: Iteration is incremental
-            ControlStructure(TokenTypes{ O_PAREN, ARG, SET, ARG, COMMA, ARG, LOGIC, ARG, COMMA, ARG, MOD, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        //Override: Iteration is incremental
+        ControlStructure(TokenTypes{ O_PAREN, ARG, SET, ARG, COMMA, ARG, LOGIC, ARG, COMMA, ARG, MOD, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //For each for-loop segment, parse it
-            string initializer = v[1] + "=" + v[2], condition = v[3] + v[4] + v[5], iteration = v[6] + v[7];
+            string initializer = v[0] + "=" + v[1], condition = v[2] + v[3] + v[4], iteration = v[5] + v[6];
 
             //Insert all of the necessary lines 
-            string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";delete: " + v[1] + ";";
+            string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";delete: " + v[0] + ";";
             string jumpBegin = "FOR_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
             parsedLines.push_back({ lineNum,  "var " + initializer + ";"});
             parsedLines.push_back({ lineNum,   "=" + jumpBegin + ";"});
             parsedLines.push_back({ lineNum,  "if: " + condition + "," + jumpEnd + ";" });
             statementVec.push_back(ControlStructureData(lineNum, FOR, jumpBegin, jumpEnd, endStatement));
         }),
-            //Override:  no initializer provided. Iteration is incremental
-            ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, COMMA, ARG, MOD, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        //Override:  no initializer provided. Iteration is incremental
+        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, COMMA, ARG, MOD, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //For each for-loop segment, parse it
-            string condition = v[1] + v[2] + v[3], iteration = v[4] + v[5] + v[6];
+            const string condition = v[0] + v[1] + v[2], iteration = v[3] + v[4] + v[5];
 
             //Insert all of the necessary lines 
             string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";";
@@ -93,10 +120,10 @@ int main(int argc, char* argv[]) {
             parsedLines.push_back({ lineNum,  "if: " + condition + "," + jumpEnd + ";" });
             statementVec.push_back(ControlStructureData(lineNum, FOR, jumpBegin, jumpEnd, endStatement));
         }),
-            //Override: no initializer provided. Iteration is incremental
-            ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, COMMA, ARG, MOD, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        //Override: no initializer provided. Iteration is incremental
+        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, COMMA, ARG, MOD, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //For each for-loop segment, parse it
-            string condition = v[1] + v[2] + v[3], iteration = v[4] + v[5];
+            const string condition = v[0] + v[1] + v[2], iteration = v[3] + v[4];
 
             //Insert all of the necessary lines 
             string endStatement = iteration + ";jump: FOR_" + to_string(lineNum) + ";=END_" + to_string(lineNum) + ";";
@@ -108,9 +135,9 @@ int main(int argc, char* argv[]) {
     };
 
     statements["while"] = vector<ControlStructure>{
-        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //Parse the condition
-            string condition = v[1] + v[2] + v[3];
+            string condition = v[0] + v[1] + v[2];
 
             string jumpBegin = "WHILE_" + to_string(lineNum); string jumpEnd = "END_" + to_string(lineNum);
             parsedLines.push_back({ lineNum,  "=" + jumpBegin + ";" });
@@ -121,27 +148,27 @@ int main(int argc, char* argv[]) {
     };
 
     statements["if"] = vector<ControlStructure>{
-        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        ControlStructure(TokenTypes{ O_PAREN, ARG, LOGIC, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //Parse the condition
-            string condition = v[1] + v[2] + v[3];
+            string condition = v[0] + v[1] + v[2];
             //Modify if-statement, in order to jump to the corresponding end if false.
             string line = "if: " + condition + ", END_" + to_string(lineNum) + ";";
             parsedLines.push_back({ lineNum, line });
             statementVec.push_back(ControlStructureData(lineNum, IF, "=END_" + to_string(lineNum) + ";"));
         }),
-            //Overload: Check if bool is true
-            ControlStructure(TokenTypes{ O_PAREN, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        //Overload: Check if bool is true
+        ControlStructure(TokenTypes{ O_PAREN, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //Parse the condition
-            string condition = v[1];
+            string condition = v[0];
             //Modify if-statement, in order to jump to the corresponding end if false.
             string line = "if: " + condition + ", END_" + to_string(lineNum) + ";";
             parsedLines.push_back({ lineNum, line });
             statementVec.push_back(ControlStructureData(lineNum, IF, "=END_" + to_string(lineNum) + ";"));
         }),
-            //Overload: Check if bool is false
-            ControlStructure(TokenTypes{ O_PAREN, NEG, ARG, C_PAREN, COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        //Overload: Check if bool is false
+        ControlStructure(TokenTypes{ O_PAREN, NEG, ARG, C_PAREN, O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             //Parse the condition
-            string condition = "!" + v[1];
+            string condition = "!" + v[0];
             //Modify if-statement, in order to jump to the corresponding end if false.
             string line = "if: " + condition + ", END_" + to_string(lineNum) + ";";
             parsedLines.push_back({ lineNum, line });
@@ -150,7 +177,7 @@ int main(int argc, char* argv[]) {
     };
 
     statements["else"] = vector<ControlStructure>{
-        ControlStructure(TokenTypes{ COLON  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+        ControlStructure(TokenTypes{ O_CURLY  }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             if (statementVec.size() == 0)
                 throw runtime_error("Hanging else-statement received");
             if (statementVec.back().GetType() != IF)
@@ -216,10 +243,10 @@ int main(int argc, char* argv[]) {
         })
     };
 
-    statements["end"] = vector<ControlStructure>{
-        ControlStructure(TokenTypes{ SEMICOLON }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
+    statements["}"] = vector<ControlStructure>{
+        ControlStructure(TokenTypes{ }, [&parsedLines, &statementVec](const vector<string>& v, const int& lineNum) {
             if (statementVec.size() == 0)
-                throw runtime_error("Received hanging end-statement");
+                throw runtime_error("Received hanging closing curly bracket");
 
             for (const auto& s : SplitString(statementVec.back().GetEndStatement(), ';'))
                 parsedLines.push_back({ lineNum, s + ";"});
@@ -242,6 +269,8 @@ int main(int argc, char* argv[]) {
         lines.push_back({ lineIndex, line });
     }
 
+    //an int value to keep track of the statement index
+    int index = 0;
     //Secondly, parse the lines, check for statements and handle them accordingly
     for (const auto& [lineNum, l] : lines) {
         auto parsed = Parse(l);
@@ -251,6 +280,7 @@ int main(int argc, char* argv[]) {
 
         //Thirdly, resolve control flow statements
         for (const string& x : parsed) {
+            ++index;
             //After seperating semicolons, trim them to get rid of any whitespace inbetween.
             string parsedLine = TrimWhitespace(x);
 
@@ -270,8 +300,8 @@ int main(int argc, char* argv[]) {
                     else {
                         int argType = (*found).second;
                         argTypes.push_back(argType);
-                        //As TokenTypes 5 and below are unambiguous, do not push them
-                        if (argType > 5)
+                        //As TokenTypes SET and below are unambiguous, do not push them
+                        if (argType > SET)
                             args.push_back(token);
                     }
                 }
@@ -280,15 +310,15 @@ int main(int argc, char* argv[]) {
                 try {
                     auto found = std::find_if(statements[statementName].begin(), statements[statementName].end(), [argTypes](const ControlStructure& s) {
                         return (s.GetTypes() == argTypes);
-                        });
+                    });
 
                     if (found == statements[statementName].end())
-                        ExitError(statementName + " received wrong implementation on line " + to_string(lineNum));
+                        ExitError(statementName + " received wrong implementation", lineNum);
 
-                    found->Execute(args, lineNum);
+                    found->Execute(args, index);
                 }
                 catch (const std::runtime_error& e) {
-                    ExitError(string(e.what()) + " on line " + to_string(lineNum));
+                    ExitError(string(e.what()), lineNum);
                 }
             }
             else if (statementName == "func") {
@@ -296,22 +326,22 @@ int main(int argc, char* argv[]) {
 
                 //Function should always have at least 5 tokens
                 if (tokens.size() < 5)
-                    ExitError("Invalid args in function definition on line " + to_string(lineNum));
+                    ExitError("Invalid args in function definition", lineNum);
 
-                if (tokens.back() != ":")
-                    ExitError("Expected ':' after function definition on line " + to_string(lineNum));
+                if (tokens.back() != "{")
+                    ExitError("Expected '{' after function definition", lineNum);
 
                 if (!statementVec.empty())
-                    ExitError("Cannot define a function within another statement on line " + to_string(lineNum));
+                    ExitError("Cannot define a function within another", lineNum);
 
                 //Parse the function arguments
                 //2nd index should always be a open bracket
                 if (tokens[2] != "(")
-                    ExitError("Expected '(' in function definition on line " + to_string(lineNum));
+                    ExitError("Expected '(' in function definition on line", lineNum);
 
                 //2nd to last index should always be a closing bracket
                 if (tokens[tokens.size() - 2] != ")")
-                    ExitError("Expected ')' in function definition on line " + to_string(lineNum));
+                    ExitError("Expected ')' in function definition on line", lineNum);
 
                 vector<string> args; string lastToken = "";
 
@@ -325,36 +355,39 @@ int main(int argc, char* argv[]) {
                     //If it is a seperator, it should be a ','
                     else {
                         if (found->first != ",")
-                            ExitError("Expected ',' in function argument definition on line " + to_string(lineNum));
+                            ExitError("Expected ',' in function argument definition", lineNum);
                         continue;
                     }
                 }
 
                 //Make sure the last token was indeed an argument
                 if (lastToken == ",")
-                    ExitError("Expected argument got ',' on line " + to_string(lineNum));
+                    ExitError("Expected argument got ','", lineNum);
 
                 functions.insert({ funcName, args.size() });
 
+                //Jump to end in order to prevent getting into the function through normal line iteration
+                parsedLines.push_back({ lineNum, "jump: END_" + to_string(index) + ";" });
                 //Function jump
                 parsedLines.push_back({ lineNum, "=" + funcName + ";" });
                 //End statement consisting of the deletes for every created variable
                 string endStatement = "";
                 //Variable predefinitions and pops;
                 for (const auto& arg : args) {
-                    parsedLines.push_back({ lineNum, "var " + arg + ";" });
+                    //parsedLines.push_back({ lineNum, "var " + arg + ";" });
                     parsedLines.push_back({ lineNum, "pop: " + arg + ";" });
                     endStatement += "delete:" + arg + ";";
                 }
-                statementVec.push_back(ControlStructureData(lineNum, FUNC, endStatement + "return;"));
+                //push the return back to the statementVec
+                statementVec.push_back(ControlStructureData(lineNum, FUNC, endStatement + "return;" + "=END_" + to_string(index) + ";"));
             }
             //A function call has been found
             else if (functions.find(statementName) != functions.cend()) {
                 if (tokens.size() < 4)
-                    ExitError("Invalid args provided when calling function on line " + to_string(lineNum));
+                    ExitError("Invalid args provided when calling function", lineNum);
 
                 if (tokens.back() != ";")
-                    ExitError("Expected ';' after calling function on line " + to_string(lineNum));
+                    ExitError("Expected ';' after calling function", lineNum);
 
                 //Predefine 2 vectors. FuncArgs stores function calls and the arguments.
                 //FuncHistory stores the hierarchy of function calls.
@@ -377,11 +410,11 @@ int main(int argc, char* argv[]) {
 
                         //Make sure this isn't the last token
                         if (i >= tokens.size() - 2)
-                            ExitError("Expected '(' when calling function on line " + to_string(lineNum));
+                            ExitError("Expected '(' when calling function", lineNum);
 
                         //If the next token isn't a '(', throw an error
                         if (tokens[i + 1] != "(")
-                            ExitError("Expected '(' when calling function on line " + to_string(lineNum));
+                            ExitError("Expected '(' when calling function", lineNum);
 
                         //Skip over the next token, as we have confirmed it is a '('
                         i++;; continue;
@@ -389,16 +422,16 @@ int main(int argc, char* argv[]) {
 
                     //As we skip over valid '(', they should not be here
                     if (token == "(")
-                        ExitError("Hanging '(' received in function call on line " + to_string(lineNum));
+                        ExitError("Hanging '(' received in function call", lineNum);
 
                     if (token == ")") {
                         //Make sure functionHistory is not empty
                         if (funcHistory.empty())
-                            ExitError("Hanging ')' received in function call on line " + to_string(lineNum));
+                            ExitError("Hanging ')' received in function call", lineNum);
 
                         //Make sure function call doesn't end with ','
                         if (tokens[i - 1] == ",")
-                            ExitError("Expected argument got ',' on line " + to_string(lineNum));
+                            ExitError("Expected argument got ','", lineNum);
                         funcHistory.pop_back();
                         continue;
                     }
@@ -410,16 +443,16 @@ int main(int argc, char* argv[]) {
                     }
                     //if it is a seperator, make sure it is a ','
                     else if (token != ",")
-                        ExitError("Expected: ',' Got '" + token + "' when calling function on line " + to_string(lineNum));
+                        ExitError("Expected: ',' Got '" + token + "' when calling function", lineNum);
                 }
 
                 //Make sure function call doesn't end with ','
                 if (tokens[lastIndex - 1] == ",")
-                    ExitError("Expected argument got ',' on line " + to_string(lineNum));
+                    ExitError("Expected argument got ','", lineNum);
 
                 //Make sure function call ends with ';' or '>>'
                 if (tokens[lastIndex + 1] != ";" && tokens[lastIndex + 1] != ">>")
-                    ExitError("Expected end of function call, got '" + tokens[lastIndex] + "' on line " + to_string(lineNum));
+                    ExitError("Expected end of function call, got '" + tokens[lastIndex] + "'", lineNum);
 
                 //Reverse functions, as we want to resolve the inner functions first
                 reverse(funcArgs.begin(), funcArgs.end());
@@ -430,7 +463,7 @@ int main(int argc, char* argv[]) {
                     auto args = func.GetArgs(); std::reverse(args.begin(), args.end());
                     //If function args do not match actual args
                     if (function.second != args.size())
-                        ExitError("No instance of " + function.first + " takes " + to_string(args.size()) + " arguments on line " + to_string(lineNum));
+                        ExitError("No instance of " + function.first + " takes " + to_string(args.size()) + " arguments", lineNum);
                     //Push each arg to the stack
                     for (const string& arg : args) {
                         //Ignore if arg is placeholder
@@ -444,23 +477,24 @@ int main(int argc, char* argv[]) {
                 //the next 4 indices represent the variable assigning
                 if (lastIndex + 4 == tokens.size()) {
                     if (tokens[lastIndex + 1] != ">>")
-                        ExitError("Expected: '>>' Got: '" + tokens[lastIndex + 1] + "' on line " + to_string(lineNum));
+                        ExitError("Expected: '>>' Got: '" + tokens[lastIndex + 1] + "'", lineNum);
                     parsedLines.push_back({ lineNum, "pop: " + tokens[lastIndex + 2] + ";" });
                 }
+                //If the value is below that, clear the stack, since the pushed return value won't be used, causing a memory leak
+                else if(lastIndex + 4 > tokens.size())
+                    parsedLines.push_back({ lineNum, "pop;" });
                 //Throw an error if the value is above that
-                else if (lastIndex + 4 < tokens.size()) {
-                    ExitError("Invalid args provided when calling function on line " + to_string(lineNum));
-                }
+                else if (lastIndex + 4 < tokens.size())
+                    ExitError("Invalid args provided when calling function", lineNum);
             }
-            else {
+            else 
                 parsedLines.push_back({ lineNum, parsedLine });
-            }
         }
     }
 
     //If any statements are still in vec, no end was received.
     if (statementVec.size() > 0)
-        ExitError("If-statement did not receive end on line " + to_string(statementVec.front().GetLine()));
+        ExitError("If-statement did not receive end", statementVec.front().GetLine());
 
     lines.clear();
 
@@ -479,16 +513,15 @@ int main(int argc, char* argv[]) {
         blacklist.insert(label);
     }
 
-
     // Function that searches through memory and returns iterator to a variable given a name
     auto FindVar = [&memory](const std::string& varName) {
-        auto found = memory.find(move(varName));
+        auto found = memory.find(varName);
         if (found != memory.cend()) {
             return found;
         }
 
-        throw new runtime_error("Instruction received undefined identifier '" + varName + "'");
-        };
+        throw runtime_error("Instruction received undefined identifier '" + varName + "'");
+    };
 
     // Function that returns a var object for a specific value. If value is a variable it returns that var 
     auto ResolveValue = [&memory](const std::string& value) {
@@ -498,7 +531,7 @@ int main(int argc, char* argv[]) {
         // If the type is still nothing, perhaps it is a variable
         if (type == ERROR) {
             //In case of it being a variable, the value acts as a name
-            auto found = memory.find(move(value));
+            auto found = memory.find(value);
             if (found == memory.cend())
                 throw std::runtime_error("Instruction received undefined identifier '" + value + "'");
             type = found->second.GetType();
@@ -510,24 +543,24 @@ int main(int argc, char* argv[]) {
         }
 
         switch (type) {
-        case STRING: {
-            return Var(value);
+            case STRING: {
+                return Var(value);
+            }
+            case DOUBLE: {
+                return Var(fast_stod(value));
+            }
+            case INT: {
+                return Var(fast_stoi(value));
+            }
+            case BOOL: {
+                if (value == "true")
+                    return Var(true);
+                else
+                    return Var(false);
+            }
+            default: break;
         }
-        case DOUBLE: {
-            return Var(stod(value));
-        }
-        case INT: {
-            return Var(stoi(value));
-        }
-        case BOOL: {
-            if (value == "true")
-                return Var(true);
-            else
-                return Var(false);
-        }
-        default: break;
-        }
-        };
+    };
 
     auto ValidateVarName = [&memory, &blacklist](const std::string& varName) {
         // Check for invalid characters and digit-only names
@@ -564,7 +597,7 @@ int main(int argc, char* argv[]) {
         if (found == instructions.cend())
             throw std::runtime_error("Instruction expected, got: '" + funcName + "'");
 
-        const auto& funcSet = found->second;
+        const auto funcSet = found->second;
 
         // Get the corresponding Instruction implementation based on the types
         const auto func = std::find_if(funcSet.cbegin(), funcSet.cend(), [&types](const Instruction& f) {
@@ -587,11 +620,21 @@ int main(int argc, char* argv[]) {
         }
 
         return func->GetImplementation();
-        };
+    };
+
+    auto FindInstructionA = [&instructions](const std::string& funcName) {
+        // Find the Instruction vector given the name
+        const auto found = instructions.find(funcName);
+        if (found == instructions.cend())
+            throw std::runtime_error("Instruction expected, got: '" + funcName + "'");
+
+        //Return the first implementation of the function with a given name
+        return found->second.begin()->GetImplementation();
+    };
 
     instructions["print"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [ResolveValue](const Arguments& v) {
-            const Var var1 = ResolveValue(move(v[0])); int type = var1.GetType();
+            const Var& var1 = ResolveValue(v[0]); int type = var1.GetType();
 
             switch (type) {
                 case STRING: {
@@ -601,7 +644,7 @@ int main(int argc, char* argv[]) {
                 }
                 case DOUBLE: {
                     auto val1 = get<double>(var1.GetData());
-                    cout << to_string(val1);
+                    cout << (val1);
                     break;
                 }
                 case INT: {
@@ -623,8 +666,8 @@ int main(int argc, char* argv[]) {
     };
 
     instructions["printl"] = vector<Instruction>{
-        Instruction(TokenTypes{ COLON, ARG }, [FindInstruction](const Arguments& v) {
-            FindInstruction("print", TokenTypes{ COLON, ARG })(vector<string> { v[0] });
+        Instruction(TokenTypes{ COLON, ARG }, [FindInstructionA](const Arguments& v) {
+            FindInstructionA("print")(vector<string> { v[0] });
             cout << "\n";
         })
     };
@@ -644,7 +687,7 @@ int main(int argc, char* argv[]) {
 
     instructions["input"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
-            Var& var1 = FindVar(move(v[0]))->second; int type = var1.GetType();
+            Var& var1 = FindVar(v[0])->second; int type = var1.GetType();
             // Reset errorLevel to 0 
             errorLevel = 0;
 
@@ -670,11 +713,11 @@ int main(int argc, char* argv[]) {
                     break;
                 }
                 case DOUBLE: {
-                    var1.SetData(stod(line));
+                    var1.SetData(fast_stod(line));
                     break;
                 }
                 case INT: {
-                    var1.SetData(stoi(line));
+                    var1.SetData(fast_stoi(line));
                     break;
                 }
                 case BOOL: {
@@ -687,15 +730,18 @@ int main(int argc, char* argv[]) {
                 default: break;
             }
         }),
-            // Overload: Print a string before inputting. 
-            Instruction(TokenTypes{ COLON, ARG, COMMA, ARG }, [&](const Arguments& v) {
-                cout << FormatStringA(v[0]); FindInstruction("input", TokenTypes{ COLON, ARG })(Arguments { v[1] });
-            })
+        // Overload: Print a string before inputting. 
+        Instruction(TokenTypes{ COLON, ARG, COMMA, ARG }, [&](const Arguments& v) {
+            cout << FormatStringA(v[0]); FindInstruction("input", TokenTypes{ COLON, ARG })(Arguments { v[1] });
+        })
     };
 
     instructions["push"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&stack, ResolveValue](const Arguments& v) {
-            const Var var1 = ResolveValue(move(v[0]));
+            const Var& var1 = ResolveValue(v[0]);
+
+            if (var1.GetType() == ERROR)
+                throw runtime_error("Tried pushing uninitialized variable '" + v[0] + "' onto stack");
 
             // Push it to the stack
             stack.emplace_back(var1);
@@ -704,17 +750,29 @@ int main(int argc, char* argv[]) {
 
     instructions["pop"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&memory, FindVar, &stack, &errorLevel](const Arguments& v) {
-            Var& var1 = FindVar(move(v[0]))->second; int type = var1.GetType();
             // Reset errorLevel
             errorLevel = 0;
+            auto it = memory.find(v[0]);
 
             if (stack.empty()) {
                 errorLevel = 1; return;
             }
 
-            int topType = stack.back().GetType();
-            Data topData = stack.back().GetData();
+            //Variable does not exist, initialize it. 
+            if (it == memory.cend()) {
+                memory[v[0]] = stack.back(); stack.pop_back();
+                return;
+            }
+
+            //Get the top of the stack
+            const Var& top = stack.back();
             stack.pop_back();
+
+
+            const int& topType = top.GetType();
+            const Data& topData = top.GetData();
+            //Get the variable from the iterator.
+            Var& var1 = it->second; int type = var1.GetType();
 
             // Uninitialized variable as target, set type to topType
             if (type == ERROR)
@@ -725,56 +783,52 @@ int main(int argc, char* argv[]) {
 
             switch (type) {
                 case STRING: {
-                    auto val1 = get<string>(topData);
+                    std::string val1 = std::get<std::string>(topData);
                     FormatString(val1);
-                    var1.SetData(val1);
+                    var1.SetData(std::move(val1));
                     break;
                 }
                 case DOUBLE: {
-                    auto val1 = get<double>(topData);
-                    var1.SetData(val1);
+                    var1.SetData(std::get<double>(topData));
                     break;
                 }
                 case INT: {
-                    auto val1 = get<int>(topData);
-                    var1.SetData(val1);
+                    var1.SetData(std::get<int>(topData));
                     break;
                 }
                 case BOOL: {
-                    auto val1 = get<bool>(topData);
-                    var1.SetData(val1);
+                    var1.SetData(std::get<bool>(topData));
                     break;
                 }
-            default: break;
+                default: break;
             }
+        }),
+        Instruction(TokenTypes{ }, [&stack](const Arguments& v) {
+            stack.clear();
         })
     };
 
     instructions["var"] = vector<Instruction>{
         Instruction(TokenTypes{ ARG, SET, ARG }, [&](const Arguments& v) {
-            string name = v[0];
-            const Var var1 = ResolveValue(move(v[1])); int type = var1.GetType();
+            const string& name = v[0];
+            const Var& var1 = ResolveValue(v[1]); int type = var1.GetType();
 
-            ValidateVarName(move(name));
+            ValidateVarName(name);
             switch (type) {
                 case STRING: {
-                    auto val1 = get<string>(var1.GetData()); FormatString(val1);
-                    memory[name] = Var(val1);
+                    memory[name] = Var(FormatStringA(get<string>(var1.GetData())));
                     break;
                 }
                 case DOUBLE: {
-                    auto val1 = get<double>(var1.GetData());
-                    memory[name] = Var(val1);
+                    memory[name] = Var(get<double>(var1.GetData()));
                     break;
                 }
                 case INT: {
-                    auto val1 = get<int>(var1.GetData());
-                    memory[name] = Var(val1);
+                    memory[name] = Var(get<int>(var1.GetData()));
                     break;
                 }
                 case BOOL: {
-                    auto val1 = get<bool>(var1.GetData());
-                    memory[name] = Var(val1);
+                    memory[name] = Var(get<bool>(var1.GetData()));
                     break;
                 }
                 default: break;
@@ -782,7 +836,7 @@ int main(int argc, char* argv[]) {
         }),
         // Overload: Define variable, but do not initialize it
         Instruction(TokenTypes{ ARG }, [&memory, ValidateVarName](const Arguments& v) {
-            string name = v[0];
+            const string& name = v[0];
             ValidateVarName(name);
 
             memory[name] = Var();
@@ -791,14 +845,13 @@ int main(int argc, char* argv[]) {
 
     instructions["exit"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [ResolveValue, start](const Arguments& v) {
-            const Var var1 = ResolveValue(move(v[0])); int type = var1.GetType();
+            const Var& var1 = ResolveValue(v[0]); int type = var1.GetType();
 
             if (type != INT) throw runtime_error(("Exit requires argument type: 'int' got: '" + IntToType(type) + "'").c_str());
             int code = get<int>(var1.GetData());
 
-            auto end = std::chrono::high_resolution_clock::now();
             cout << endl << "Program sucessfully executed. Exited with code " + to_string(code) + "." << endl <<
-                "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << endl;
+                "Elapsed time: " << duration_cast<milliseconds>(high_resolution_clock::now() - start).count() << " ms" << endl;
 
             exit(code);
         })
@@ -818,7 +871,7 @@ int main(int argc, char* argv[]) {
             var1.SetData(val1 / val2);
         }
         else if (op == "%=") {
-            // Ensure modulo is only used with integers
+            // Make sure modulo is only used with integers
             if constexpr (std::is_integral_v<std::decay_t<decltype(val1)>> && std::is_integral_v<std::decay_t<decltype(val2)>>) {
                 if (val2 == 0) {
                     throw runtime_error("Modulo by 0 attempted");
@@ -834,30 +887,25 @@ int main(int argc, char* argv[]) {
         // Sets a variable to a value
         // the final line should look like [VarName] var1 = value, thus having an additional 0 prepended.
         Instruction(TokenTypes{ ARG, SET, ARG }, [&](const Arguments& v) {
-            Var& var0 = FindVar(move(v[0]))->second;
-            const Var var1 = ResolveValue(move(v[1]));
+            Var& var0 = FindVar(v[0])->second;
+            const Var& var1 = ResolveValue(v[1]);
             int type = var1.GetType();
 
             switch (type) {
                 case STRING: {
-                    auto val1 = get<string>(var1.GetData());
-                    FormatString(val1);
-                    var0.SetData(val1);
+                    var0.SetData(FormatStringA(get<string>(var1.GetData())));
                     break;
                 }
                 case DOUBLE: {
-                    auto val1 = get<double>(var1.GetData());
-                    var0.SetData(val1);
+                    var0.SetData(get<double>(var1.GetData()));
                     break;
                 }
                 case INT: {
-                    auto val1 = get<int>(var1.GetData());
-                    var0.SetData(val1);
+                    var0.SetData(get<int>(var1.GetData()));
                     break;
                 }
                 case BOOL: {
-                    auto val1 = get<bool>(var1.GetData());
-                    var0.SetData(val1);
+                    var0.SetData(get<bool>(var1.GetData()));
                     break;
                 }
                 default: break;
@@ -865,9 +913,9 @@ int main(int argc, char* argv[]) {
         }),
         //Modifying a variable
         Instruction(TokenTypes{ ARG, MOD, ARG }, [&](const Arguments& v) {
-            Var& var1 = FindVar(move(v[0]))->second; int nameType = var1.GetType();
-            Var var2 = ResolveValue(move(v[2])); int valueType = var2.GetType();
-            string op = v[1];
+            Var& var1 = FindVar(v[0])->second; int nameType = var1.GetType();
+            const Var& var2 = ResolveValue(v[2]); int valueType = var2.GetType();
+            const string& op = v[1];
 
 
             // If it isn't the same type, or number type.
@@ -916,8 +964,8 @@ int main(int argc, char* argv[]) {
         }),
         // Incrementing or decrementing variable
         Instruction(TokenTypes{ ARG, MOD }, [&](const Arguments& v) {
-            Var& var1 = FindVar(move(v[0]))->second; int type = var1.GetType();
-            string op = move(v[1]);
+            Var& var1 = FindVar(v[0])->second; int type = var1.GetType();
+            const string& op = v[1];
 
             if (op != "++" && op != "--")
                 throw runtime_error("Wrong operator received. Expected '++' or '--'");
@@ -946,7 +994,7 @@ int main(int argc, char* argv[]) {
 
     instructions["sqrt"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
-            Var& var1 = FindVar(move(v[0]))->second; int nameType = var1.GetType();
+            Var& var1 = FindVar(v[0])->second; int nameType = var1.GetType();
 
             // If it isn't the same type, or number type.
             if (nameType != DOUBLE && nameType != INT)
@@ -967,64 +1015,131 @@ int main(int argc, char* argv[]) {
         })
     };
 
+    instructions["abs"] = vector<Instruction>{
+        Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
+            Var& var1 = FindVar(v[0])->second; int nameType = var1.GetType();
+
+            // If it isn't the same type, or number type.
+            if (nameType != DOUBLE && nameType != INT)
+                throw runtime_error(("Absolute operation received wrong type. Got: '" + IntToType(nameType) + "'").c_str());
+
+            switch (nameType) {
+                case DOUBLE: {
+                    auto val1 = get<double>(var1.GetData());
+                    var1.SetData(abs(val1));
+                    break;
+                }
+                case INT: {
+                    auto val1 = get<int>(var1.GetData());
+                    var1.SetData(abs(val1));
+                    break;
+                }
+            }
+        })
+    };
+
+    //Gives random double between 0 and 1
+    instructions["rand"] = vector<Instruction>{
+        Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
+            Var& var1 = FindVar(v[0])->second;
+            var1.SetData(GenerateRandomDouble());
+        })
+    };
+
+    //Function that gives the elapsed time in milliseconds since the program started
+    instructions["millis"] = vector<Instruction>{
+        Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
+            Var& var1 = FindVar(v[0])->second;
+            var1.SetData((int)duration_cast<milliseconds>(high_resolution_clock::now() - start).count());
+        })
+    };
+
+    //Function that gives the elapsed time in seconds since the program started
+    instructions["seconds"] = vector<Instruction>{
+        Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
+            Var& var1 = FindVar(v[0])->second;
+            var1.SetData(duration<double>(high_resolution_clock::now() - start).count());
+        })
+    };
+
+    instructions["delay"] = vector<Instruction>{
+        Instruction(TokenTypes{ COLON, ARG }, [&](const Arguments& v) {
+            const Var& var1 = ResolveValue(v[0]); int nameType = var1.GetType();
+
+            // If it isn't the same type, or number type.
+            if (nameType != DOUBLE && nameType != INT)
+                throw runtime_error(("Delay received wrong type. Got: '" + IntToType(nameType) + "'").c_str());
+
+            switch (nameType) {
+                case DOUBLE: {
+                    auto val1 = get<double>(var1.GetData());
+                    std::this_thread::sleep_for(milliseconds((int)val1));
+                    break;
+                }
+                case INT: {
+                    auto val1 = get<int>(var1.GetData());
+                    std::this_thread::sleep_for(milliseconds(val1));
+                    break;
+                }
+            }
+        })
+    };
+
     instructions["delete"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&memory, &errorLevel](const Arguments& v) {
-            string name = v[0]; errorLevel = 0;
-
-            if (memory.find(name) == memory.cend()) {
+            const string& name = v[0]; errorLevel = 0;
+            const auto it = memory.find(name);
+            if (it == memory.cend()) {
                 errorLevel = 1; return;
             }
 
-            memory.erase(name);
+            memory.erase(it);
         })
     };
 
     instructions["jump"] = vector<Instruction>{
         Instruction(TokenTypes{ COLON, ARG }, [&labelMap, &parsedLineIndex](const Arguments& v) {
-            string name = v[0];
-
-            if (labelMap.find(name) == labelMap.cend())
+            const string& name = v[0];
+            auto iter = labelMap.find(name);
+            if (iter == labelMap.cend())
                 throw runtime_error(("Tried to jump to undefined label. Got: '" + name + "'").c_str());
 
-            int newLine = labelMap[name];
-
             // Jump to the new line
-            parsedLineIndex = newLine;
+            parsedLineIndex = iter->second;
         })
     };
 
     instructions["call"] = std::vector<Instruction>{
-        Instruction(TokenTypes{ COLON, ARG }, [&labelMap, &callHistory, &parsedLineIndex](std::vector<std::string> v) {
-            std::string name = v[0];
+        Instruction(TokenTypes{ COLON, ARG }, [&labelMap, &callHistory, &parsedLineIndex](const Arguments& v) {
+            // Push current line to callHistory
+            callHistory.emplace_back(parsedLineIndex);
+            const string& name = v[0];
+            const auto iter = labelMap.find(name);
+            if (iter == labelMap.cend())
+                throw runtime_error(("Tried to jump to undefined label. Got: '" + name + "'").c_str());
 
-            if (labelMap.find(name) == labelMap.cend())
-                throw std::runtime_error(("Tried to call undefined function. Got: '" + name + "'").c_str());
-
-            int newLine = labelMap.at(name);
-
-            // Push current line to callHistory and set index to newLine
-            callHistory.push_back(parsedLineIndex);
-            parsedLineIndex = newLine;
+            // Jump to the new line
+            parsedLineIndex = iter->second;
         })
     };
 
     instructions["return"] = vector<Instruction>{
-        Instruction(TokenTypes{}, [&callHistory, FindInstruction, &parsedLineIndex](const Arguments& v) {
+        Instruction(TokenTypes{}, [&callHistory, FindInstructionA, &parsedLineIndex](const Arguments& v) {
             // Return is equivalent to exit if the callHistory is empty.
             if (callHistory.size() < 1)
-                FindInstruction("exit", TokenTypes{ COLON, ARG })(vector<string> { "0" });
+                FindInstructionA("exit")(vector<string> { "0" });
 
             // Set current line to latest entry and remove the entry. 
             parsedLineIndex = callHistory.back(); callHistory.pop_back();
         }),
         // Override: Return a variable
-        Instruction(TokenTypes{ COLON, ARG }, [&callHistory, FindInstruction, &parsedLineIndex](const Arguments& v) {
-            string name = v[0];
+        Instruction(TokenTypes{ COLON, ARG }, [&callHistory, FindInstructionA, &parsedLineIndex](const Arguments& v) {
+            const string& name = v[0];
 
             // Push the variable to the stack
-            FindInstruction("push", TokenTypes{ COLON, ARG })(vector<string> { name });
+            FindInstructionA("push")(vector<string> { name });
             // Also delete the function
-            FindInstruction("delete", TokenTypes{ COLON, ARG })(vector<string> { name });
+            FindInstructionA("delete")(vector<string> { name });
 
             // Set current line to latest entry and remove the entry. 
             parsedLineIndex = callHistory.back(); callHistory.pop_back();
@@ -1032,84 +1147,81 @@ int main(int argc, char* argv[]) {
     };
 
     instructions["if"] = vector<Instruction>{
-        Instruction(TokenTypes{ COLON, ARG, LOGIC, ARG, COMMA, ARG }, [&](const vector<string>& v) {
-            Var var1 = ResolveValue(v[0]), var2 = ResolveValue(v[2]);
+        Instruction(TokenTypes{ COLON, ARG, LOGIC, ARG, COMMA, ARG }, [&](const Arguments& v) {
+            const Var& var1 = ResolveValue(v[0]), var2 = ResolveValue(v[2]);
             int value1Type = var1.GetType(), value2Type = var2.GetType();
-            string op = v[1];
 
-            //Check for types. Compare doubles and ints
-            if (value1Type != value2Type && !(value1Type == DOUBLE && value2Type == INT) && !(value1Type == INT && value2Type == DOUBLE)) {
-                throw runtime_error(("Comparing different types. Type1: '" + IntToType(value1Type) + "' Type2: '" + IntToType(value2Type) + "'").c_str());
-            }
+            // First figure out which exact operator is being used
+            int op = (v[1] == "==") ? 0 : (v[1] == "!=") ? 1 : (v[1] == "<") ? 2 : (v[1] == ">") ? 3 : (v[1] == "<=") ? 4 : (v[1] == ">=") ? 5 : -1;
 
-            //Check for equality and inequality
-            if (op == "==" || op == "!=") {
-                bool condition = (op == "==") ? (var1.GetData() == var2.GetData()) : (var1.GetData() != var2.GetData());
-                if (!condition) {
-                    FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[3] });
-                }
+            if (op == -1)
+                throw std::runtime_error("Invalid operator: " + v[1]);
+            
+            // Check for types. Compare doubles and ints
+            if (value1Type != value2Type && !(value1Type == DOUBLE && value2Type == INT) && !(value1Type == INT && value2Type == DOUBLE))
+                throw std::runtime_error("Comparing different types. Type1: '" + IntToType(value1Type) + "' Type2: '" + IntToType(value2Type) + "'");
+            
+
+            // Handle equality and inequality first
+            if (op == 0 || op == 1) {
+                if (op == 0 && var1.GetData() != var2.GetData())
+                    FindInstructionA("jump")({ v[3] });
+                if (op == 1 && var1.GetData() == var2.GetData())
+                    FindInstructionA("jump")({ v[3] });
                 return;
             }
 
-            //Make sure strigns and bools cannot be compared relationally
+            // Make sure strings and bools cannot be compared relationally
             if (value1Type == STRING || value1Type == BOOL) {
-                throw runtime_error(("Cannot use relational operators on Type: '" + IntToType(value1Type) + "'").c_str());
+                throw std::runtime_error("Cannot use relational operators on Type: '" + IntToType(value1Type) + "'");
             }
 
             bool jump = false;
-            switch (value1Type) {
-                case DOUBLE: {
-                    auto val1 = get<double>(var1.GetData());
-                    auto val2 = get<double>(var2.GetData());
-                    //Relational operators
-                    if ((op == "<" && val1 >= val2) ||
-                        (op == ">" && val1 <= val2) ||
-                        (op == ">=" && val1 < val2) ||
-                        (op == "<=" && val1 > val2)) {
-                        jump = true;
-                    }
-                    break;
+            if (value1Type == DOUBLE || value1Type == INT) {
+                //Get the values. Taking into account that doubles can be compared to ints.
+                double val1 = (value1Type == DOUBLE) ? get<double>(var1.GetData()) : (double)(get<int>(var1.GetData()));
+                double val2 = (value2Type == DOUBLE) ? get<double>(var2.GetData()) : (double)(get<int>(var2.GetData()));
+
+                // Relational operators
+                switch (op) {
+                    case 2: // <
+                        jump = (val1 >= val2);
+                        break;
+                    case 3: // >
+                        jump = (val1 <= val2);
+                        break;
+                    case 4: // <=
+                        jump = (val1 > val2);
+                        break;
+                    case 5: // >=
+                        jump = (val1 < val2);
+                        break;
                 }
-                case INT: {
-                    auto val1 = get<int>(var1.GetData());
-                    auto val2 = get<int>(var2.GetData());
-                    //Relational operators
-                    if ((op == "<" && val1 >= val2) ||
-                        (op == ">" && val1 <= val2) ||
-                        (op == ">=" && val1 < val2) ||
-                        (op == "<=" && val1 > val2)) {
-                        jump = true;
-                    }
-                    break;
-                }
-                default:
-                    throw runtime_error("Cannot use relational operators on Type: '" + IntToType(value1Type) + "'");
             }
 
-            //Jump to line if condition isn't met
-            if (jump) {
-                FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[3] });
-            }
-    }),
+            // Jump to line if condition isn't met
+            if (jump) 
+                FindInstructionA("jump")({ v[3] });
+        }),
         // Override: If bool is true or variable is initialized
         Instruction(TokenTypes{ COLON, ARG, COMMA, ARG }, [&](const Arguments& v) {
-            Var var1 = FindVar(move(v[0]))->second; int type = var1.GetType();
+            const Var& var1 = FindVar(v[0])->second; int type = var1.GetType();
 
             // If the type is bool and it isn't true or if the type is errorType, jump to end
             if(type == BOOL && !get<bool>(var1.GetData()))
-                FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[1] });
+                FindInstructionA("jump")(vector<string> { v[1] });
             if(type == ERROR)
-                FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[1] });
+                FindInstructionA("jump")(vector<string> { v[1] });
         }),
         // Override: If bool is true or variable is initialized
         Instruction(TokenTypes{ COLON, NEG, ARG, COMMA, ARG }, [&](const Arguments& v) {
-            Var var1 = FindVar(move(v[0]))->second; int type = var1.GetType();
+            const Var& var1 = FindVar(v[0])->second; int type = var1.GetType();
 
             // If the type is bool and it is true or if the type isn't errorType, jump to end
             if (type == BOOL && get<bool>(var1.GetData()))
-                FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[1] });
+                FindInstructionA("jump")(vector<string> { v[1] });
             else if (type != ERROR && type != BOOL)
-                FindInstruction("jump", TokenTypes{ COLON, ARG })(vector<string> { v[1] });
+                FindInstructionA("jump")(vector<string> { v[1] });
         })
     };
 
@@ -1123,6 +1235,7 @@ int main(int argc, char* argv[]) {
     //Fifth, tokenize each line and go through the actual interpretation process. 
     for (const auto& [lineNum, l] : parsedLines) {
         vector<string> tokens;
+
         //Skip labels
         if (l[0] == '=') {
             //Take into consideration that the location labels point to should be kept the same when actually running the function implementations
@@ -1133,12 +1246,12 @@ int main(int argc, char* argv[]) {
             tokens = Tokenize(l);
         }
         catch (const std::runtime_error& e) {
-            ExitError(string(e.what()) + " on line " + to_string(lineNum));
+            ExitError(string(e.what()), lineNum);
         }
 
         //Check if semicolon is found
         if (l.back() != ';') {
-            ExitError("Missing semicolon on line " + to_string(lineNum));
+            ExitError("Missing semicolon", lineNum);
         }
 
         string funcName = tokens[0];
@@ -1161,8 +1274,8 @@ int main(int argc, char* argv[]) {
             else {
                 int argType = (*found).second;
                 argTypes.push_back(argType);
-                //As TokenTypes 2 and below are unambiguous, do not push them
-                if (argType > 5)
+                //As TokenTypes SET and below are unambiguous, do not push them
+                if (argType > SET)
                     args.push_back(token);
             }
         }
@@ -1175,11 +1288,11 @@ int main(int argc, char* argv[]) {
         catch (const std::runtime_error& e) {
             //Specialized error message for [VarName] as it indicates a non-instruction funcName
             if (funcName == "[VarName]")
-                ExitError("No Instruction or identifier by the name '" + tokens[1] + "' found on line " + to_string(lineNum));
-            ExitError(string(e.what()) + " on line " + to_string(lineNum));
+                ExitError("No Instruction or identifier by the name '" + tokens[1] + "' found", lineNum);
+            ExitError(string(e.what()), lineNum);
         }
     }
-    start = std::chrono::high_resolution_clock::now();
+
     //Execute the functions
     for (; parsedLineIndex < instructionVec.size(); parsedLineIndex++) {
         //If parsedLineIndex is on the latest call, delete it to avoid duplicate calls. 
@@ -1187,7 +1300,6 @@ int main(int argc, char* argv[]) {
             callHistory.erase(callHistory.begin() + parsedLineIndex);
 
         int lineNum = instructionVec[parsedLineIndex].GetLine();
-        const auto args = instructionVec[parsedLineIndex].GetArgs();
 
         //Label
         if (lineNum == -1)
@@ -1195,15 +1307,15 @@ int main(int argc, char* argv[]) {
 
         try {
             //Get the function implementation and pass in the args. Index 2 and 1 respectively
-            instructionVec[parsedLineIndex].GetImplementation()(args);
+            instructionVec[parsedLineIndex].Execute();
         }
         catch (const std::runtime_error& e) {
-            ExitError(e.what() + string(" on line ") + to_string(lineNum));
+            ExitError(e.what(), lineNum);
         }
     }
 
     //Use the actual exit instruction to exit. Effectively saving 3 lines of code lol
-    FindInstruction("exit", TokenTypes{ COLON, ARG })(Arguments{ "0" });
+    FindInstructionA("exit")( Arguments{ "0" });
 
     file.close();
     return 0;
